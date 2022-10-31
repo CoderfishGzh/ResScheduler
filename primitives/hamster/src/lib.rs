@@ -1,5 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 mod constants;
+pub mod p_dapp;
+pub mod p_deployment;
 pub mod p_provider;
 
 use frame_support::sp_runtime::{
