@@ -23,9 +23,8 @@ use hex_literal::hex;
 use node_runtime::{
 	constants::currency::*, wasm_binary_unwrap, AuthorityDiscoveryConfig, BabeConfig,
 	BalancesConfig, Block, CouncilConfig, DemocracyConfig, ElectionsConfig, GrandpaConfig,
-	ImOnlineConfig, IndicesConfig, MaxNominations, SessionConfig, SessionKeys, SocietyConfig,
-	StakerStatus, StakingConfig, SudoConfig, SystemConfig, TechnicalCommitteeConfig, GatewayConfig,
-	ProviderConfig, ResourceOrderConfig, MarketConfig,
+	ImOnlineConfig, IndicesConfig, MaxNominations, ProviderConfig, SessionConfig, SessionKeys,
+	SocietyConfig, StakerStatus, StakingConfig, SudoConfig, SystemConfig, TechnicalCommitteeConfig,
 };
 use pallet_im_online::sr25519::AuthorityId as ImOnlineId;
 use sc_chain_spec::ChainSpecExtension;
@@ -175,7 +174,7 @@ fn staging_testnet_config_genesis() -> GenesisConfig {
 		// 5Ff3iXP75ruzroPWRP2FYBHWnmGGBSb63857BgnzCoXNxfPo
 		"9ee5e5bdc0ec239eb164f865ecc345ce4c88e76ee002e0f7e318097347471809"
 	]
-		.into();
+	.into();
 
 	let endowed_accounts: Vec<AccountId> = vec![root_key.clone()];
 
@@ -211,8 +210,8 @@ pub fn get_from_seed<TPublic: Public>(seed: &str) -> <TPublic::Pair as Pair>::Pu
 
 /// Helper function to generate an account ID from seed
 pub fn get_account_id_from_seed<TPublic: Public>(seed: &str) -> AccountId
-	where
-		AccountPublic: From<<TPublic::Pair as Pair>::Public>,
+where
+	AccountPublic: From<<TPublic::Pair as Pair>::Public>,
 {
 	AccountPublic::from(get_from_seed::<TPublic>(seed)).into_account()
 }
@@ -297,36 +296,9 @@ pub fn testnet_genesis(
 	const STASH: Balance = ENDOWMENT / 1000;
 
 	GenesisConfig {
-		gateway: GatewayConfig {
-			gateway: Default::default(),
-			gateway_node_count: Default::default(),
-			account_peer_map: Default::default(),
-			gateways: Default::default(),
-		},
 		provider: ProviderConfig {
 			resource: Default::default(),
 			resource_index: Default::default(),
-			resource_count: Default::default(),
-			future_expired_resource: Default::default(),
-			provider: Default::default(),
-		},
-		resource_order: ResourceOrderConfig {
-			order_index: Default::default(),
-			resource_orders: Default::default(),
-			agreement_index: Default::default(),
-			rental_agreements: Default::default(),
-			user_agreements: Default::default(),
-			provider_agreements: Default::default(),
-			block_agreement: Default::default(),
-			user_orders: Default::default(),
-		},
-		market: MarketConfig {
-			staking: vec![],
-			gateway_base_fee: 100 * CENTS,
-			market_base_multiplier: (5, 3, 1),
-			provider_base_fee: 100 * CENTS,
-			client_base_fee: 100 * CENTS,
-			total_staked: Default::default(),
 		},
 		system: SystemConfig { code: wasm_binary_unwrap().to_vec() },
 		balances: BalancesConfig {
@@ -549,7 +521,7 @@ fn hamster_testnet_config_genesis() -> GenesisConfig {
 		// 5H8iJfLPRLfNo7iX6EWcNu3gCWG1VVoLFmbrwBqGd5GXCHBH
 		"e03ba8526388be0809b2bffd0321287fb94fc1d1618d1878ac41fe6ca17d790a"
 	]
-		.into();
+	.into();
 
 	let endowed_accounts: Vec<AccountId> = vec![root_key.clone()];
 
@@ -558,8 +530,7 @@ fn hamster_testnet_config_genesis() -> GenesisConfig {
 
 /// hamster testnet config.
 pub fn hamster_testnet_config() -> ChainSpec {
-	let boot_nodes = vec![
-	];
+	let boot_nodes = vec![];
 	ChainSpec::from_genesis(
 		"Hamster Testnet",
 		"hamster_testnet",
@@ -576,7 +547,6 @@ pub fn hamster_testnet_config() -> ChainSpec {
 		Default::default(),
 	)
 }
-
 
 /// Helper function to create GenesisConfig for testing
 pub fn hamster_genesis(
@@ -641,36 +611,9 @@ pub fn hamster_genesis(
 	const STASH: Balance = ENDOWMENT / 1000;
 
 	GenesisConfig {
-		gateway: GatewayConfig {
-			gateway: Default::default(),
-			gateway_node_count: Default::default(),
-			account_peer_map: Default::default(),
-			gateways: Default::default(),
-		},
 		provider: ProviderConfig {
 			resource: Default::default(),
 			resource_index: Default::default(),
-			resource_count: Default::default(),
-			future_expired_resource: Default::default(),
-			provider: Default::default(),
-		},
-		resource_order: ResourceOrderConfig {
-			order_index: Default::default(),
-			resource_orders: Default::default(),
-			agreement_index: Default::default(),
-			rental_agreements: Default::default(),
-			user_agreements: Default::default(),
-			provider_agreements: Default::default(),
-			block_agreement: Default::default(),
-			user_orders: Default::default(),
-		},
-		market: MarketConfig {
-			staking: vec![],
-			gateway_base_fee: 100 * CENTS,
-			market_base_multiplier: (5, 3, 1),
-			provider_base_fee: 100 * CENTS,
-			client_base_fee: 100 * CENTS,
-			total_staked: Default::default(),
 		},
 		system: SystemConfig { code: wasm_binary_unwrap().to_vec() },
 		balances: BalancesConfig {
@@ -741,7 +684,6 @@ pub fn hamster_genesis(
 		transaction_payment: Default::default(),
 	}
 }
-
 
 #[cfg(test)]
 pub(crate) mod tests {

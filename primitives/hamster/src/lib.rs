@@ -1,12 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
-
 mod constants;
-pub mod p_gateway;
-pub mod p_market;
-pub mod p_chunkcycle;
 pub mod p_provider;
-pub mod p_resource_order;
-pub mod p_deployment;
 
 use frame_support::sp_runtime::{
 	traits::{IdentifyAccount, Verify},

@@ -1,18 +1,17 @@
 use codec::{Decode, Encode};
-use frame_support::Parameter;
+use frame_support::{sp_runtime::traits::AtLeast32BitUnsigned, Parameter};
+use scale_info::TypeInfo;
 #[cfg(feature = "std")]
 use serde::{Deserialize, Serialize};
 use sp_debug_derive::RuntimeDebug;
-use frame_support::sp_runtime::traits::AtLeast32BitUnsigned;
 use sp_std::vec::Vec;
-use scale_info::TypeInfo;
 
 /// ComputingResources
 #[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, TypeInfo)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub struct ComputingResource<BlockNumber, AccountId>
-	where
-		BlockNumber: Parameter + AtLeast32BitUnsigned,
+where
+	BlockNumber: Parameter + AtLeast32BitUnsigned,
 {
 	/// computing power resource index
 	pub index: u64,
@@ -43,8 +42,8 @@ pub enum Specification {
 }
 
 impl<BlockNumber, AccountId> ComputingResource<BlockNumber, AccountId>
-	where
-		BlockNumber: Parameter + AtLeast32BitUnsigned,
+where
+	BlockNumber: Parameter + AtLeast32BitUnsigned,
 {
 	pub fn new(
 		index: u64,
@@ -108,13 +107,15 @@ impl ProviderPoints {
 	pub fn add_points(&mut self, r_points: u64, d_points: u64) {
 		self.duration_points = self.duration_points.saturating_add(d_points);
 		self.resource_points = self.resource_points.saturating_add(r_points);
-		self.total_points = self.total_points.saturating_add(d_points.saturating_add(r_points) as u128);
+		self.total_points =
+			self.total_points.saturating_add(d_points.saturating_add(r_points) as u128);
 	}
 
 	pub fn sub_points(&mut self, r_points: u64, d_points: u64) {
 		self.duration_points = self.duration_points.saturating_sub(d_points);
 		self.resource_points = self.resource_points.saturating_sub(r_points);
-		self.total_points = self.total_points.saturating_sub(d_points.saturating_add(r_points) as u128);
+		self.total_points =
+			self.total_points.saturating_sub(d_points.saturating_add(r_points) as u128);
 	}
 }
 
@@ -143,12 +144,7 @@ pub struct ResourceConfig {
 
 impl ResourceConfig {
 	pub fn new(cpu: u64, memory: u64, system: Vec<u8>, cpu_model: Vec<u8>) -> Self {
-		Self {
-			cpu,
-			memory,
-			system,
-			cpu_model,
-		}
+		Self { cpu, memory, system, cpu_model }
 	}
 }
 
@@ -173,12 +169,7 @@ impl ResourceRentalStatistics {
 		fault_count: u32,
 		fault_duration: u32,
 	) -> Self {
-		ResourceRentalStatistics {
-			rental_count,
-			rental_duration,
-			fault_count,
-			fault_duration,
-		}
+		ResourceRentalStatistics { rental_count, rental_duration, fault_count, fault_duration }
 	}
 
 	/// increase the number of leases
@@ -220,11 +211,7 @@ impl<BlockNumber> ResourceRentalInfo<BlockNumber> {
 		rent_duration: BlockNumber,
 		end_of_rent: BlockNumber,
 	) -> Self {
-		ResourceRentalInfo {
-			rent_unit_price,
-			rent_duration,
-			end_of_rent,
-		}
+		ResourceRentalInfo { rent_unit_price, rent_duration, end_of_rent }
 	}
 
 	/// set rental unit price

@@ -5004,9 +5004,7 @@ dependencies = [
  "pallet-bags-list",
  "pallet-balances",
  "pallet-bounties",
- "pallet-burn",
  "pallet-child-bounties",
- "pallet-chunkcycle",
  "pallet-collective",
  "pallet-contracts",
  "pallet-contracts-primitives",
@@ -5016,15 +5014,12 @@ dependencies = [
  "pallet-election-provider-multi-phase",
  "pallet-election-provider-support-benchmarking",
  "pallet-elections-phragmen",
- "pallet-gateway",
  "pallet-gilt",
  "pallet-grandpa",
- "pallet-hamster-api",
  "pallet-identity",
  "pallet-im-online",
  "pallet-indices",
  "pallet-lottery",
- "pallet-market",
  "pallet-membership",
  "pallet-mmr",
  "pallet-multisig",
@@ -5037,7 +5032,6 @@ dependencies = [
  "pallet-recovery",
  "pallet-referenda",
  "pallet-remark",
- "pallet-resource-order",
  "pallet-scheduler",
  "pallet-session",
  "pallet-session-benchmarking",
@@ -5679,21 +5673,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallet-burn"
-version = "4.0.0-dev"
-dependencies = [
- "frame-benchmarking",
- "frame-support",
- "frame-system",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-hamster",
- "sp-runtime",
- "sp-std",
-]
-
-[[package]]
 name = "pallet-child-bounties"
 version = "4.0.0-dev"
 dependencies = [
@@ -5708,21 +5687,6 @@ dependencies = [
  "scale-info",
  "sp-core",
  "sp-io",
- "sp-runtime",
- "sp-std",
-]
-
-[[package]]
-name = "pallet-chunkcycle"
-version = "4.0.0-dev"
-dependencies = [
- "frame-benchmarking",
- "frame-support",
- "frame-system",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-hamster",
  "sp-runtime",
  "sp-std",
 ]
@@ -5977,29 +5941,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallet-gateway"
-version = "4.0.0-dev"
-dependencies = [
- "frame-benchmarking",
- "frame-support",
- "frame-system",
- "log 0.4.17",
- "pallet-balances",
- "pallet-chunkcycle",
- "pallet-market",
- "pallet-provider",
- "pallet-resource-order",
- "pallet-timestamp",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-hamster",
- "sp-io",
- "sp-runtime",
- "sp-std",
-]
-
-[[package]]
 name = "pallet-gilt"
 version = "4.0.0-dev"
 dependencies = [
@@ -6043,21 +5984,6 @@ dependencies = [
  "sp-runtime",
  "sp-session",
  "sp-staking",
- "sp-std",
-]
-
-[[package]]
-name = "pallet-hamster-api"
-version = "4.0.0-dev"
-dependencies = [
- "frame-benchmarking",
- "frame-support",
- "frame-system",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-hamster",
- "sp-runtime",
  "sp-std",
 ]
 
@@ -6127,29 +6053,6 @@ dependencies = [
  "parity-scale-codec",
  "scale-info",
  "sp-core",
- "sp-io",
- "sp-runtime",
- "sp-std",
-]
-
-[[package]]
-name = "pallet-market"
-version = "4.0.0-dev"
-dependencies = [
- "frame-benchmarking",
- "frame-support",
- "frame-system",
- "log 0.4.17",
- "pallet-balances",
- "pallet-chunkcycle",
- "pallet-gateway",
- "pallet-provider",
- "pallet-resource-order",
- "pallet-timestamp",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-hamster",
  "sp-io",
  "sp-runtime",
  "sp-std",
@@ -6322,10 +6225,6 @@ dependencies = [
  "frame-system",
  "log 0.4.17",
  "pallet-balances",
- "pallet-chunkcycle",
- "pallet-gateway",
- "pallet-market",
- "pallet-resource-order",
  "pallet-timestamp",
  "parity-scale-codec",
  "scale-info",
@@ -6414,29 +6313,6 @@ dependencies = [
  "scale-info",
  "serde",
  "sp-core",
- "sp-io",
- "sp-runtime",
- "sp-std",
-]
-
-[[package]]
-name = "pallet-resource-order"
-version = "4.0.0-dev"
-dependencies = [
- "frame-benchmarking",
- "frame-support",
- "frame-system",
- "log 0.4.17",
- "pallet-balances",
- "pallet-chunkcycle",
- "pallet-gateway",
- "pallet-market",
- "pallet-provider",
- "pallet-timestamp",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-hamster",
  "sp-io",
  "sp-runtime",
  "sp-std",

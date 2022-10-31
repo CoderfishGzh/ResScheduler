@@ -29,7 +29,6 @@ impl OnUnbalanced<NegativeImbalance> for Author {
 	}
 }
 
-
 #[cfg(test)]
 mod multiplier_tests {
 	use pallet_transaction_payment::{Multiplier, TargetedFeeAdjustment};
