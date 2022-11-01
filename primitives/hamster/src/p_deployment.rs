@@ -7,7 +7,8 @@ use sp_std::vec::Vec;
 
 #[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, TypeInfo)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
-pub struct DeploymentInfo {
+pub struct DeploymentInfo<AccountId> {
+	pub account: AccountId,
 	pub method: DeploymentMethod,
 	pub cpu: u8,
 	pub memory: u8,
@@ -17,9 +18,16 @@ pub struct DeploymentInfo {
 	pub acliable: u8,
 }
 
-impl DeploymentInfo {
-	fn new(method: DeploymentMethod, cpu: u8, memory: u8, replicas: u8, acliable: u8) -> Self {
-		DeploymentInfo { method, cpu, memory, replicas, acliable }
+impl<AccountId> DeploymentInfo<AccountId> {
+	pub fn new(
+		account: AccountId,
+		method: DeploymentMethod,
+		cpu: u8,
+		memory: u8,
+		replicas: u8,
+		acliable: u8,
+	) -> Self {
+		DeploymentInfo { account, method, cpu, memory, replicas, acliable }
 	}
 }
 

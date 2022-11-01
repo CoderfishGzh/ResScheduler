@@ -6,7 +6,7 @@ use sp_debug_derive::RuntimeDebug;
 use sp_std::vec::Vec;
 
 /// ComputingResources
-#[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, TypeInfo)]
+#[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, TypeInfo, Default)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub struct ComputingResource<AccountId> {
 	// 资源索引
@@ -49,7 +49,13 @@ pub enum ResourceStatus {
 	Offline,
 }
 
-#[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, TypeInfo)]
+impl Default for ResourceStatus {
+	fn default() -> Self {
+		ResourceStatus::Online
+	}
+}
+
+#[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, TypeInfo, Default)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub struct ResourceConfig {
 	// 总资源
@@ -66,8 +72,14 @@ impl ResourceConfig {
 	}
 
 	// 使用资源
-	fn _use_resource(&self, _cpu: u8, _memory: u8) -> bool {
-		false
+	pub fn use_resource(&mut self, cpu: u8, memory: u8) -> bool {
+		if cpu > self.unused_cpu || memory > self.unused_memory {
+			return false
+		}
+		self.unused_cpu = self.unused_cpu.saturating_sub(cpu);
+		self.unused_memory = self.unused_memory.saturating_sub(memory);
+
+		true
 	}
 
 	// 释放资源

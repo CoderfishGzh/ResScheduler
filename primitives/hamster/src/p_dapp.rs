@@ -3,10 +3,13 @@ use scale_info::TypeInfo;
 #[cfg(feature = "std")]
 use serde::{Deserialize, Serialize};
 use sp_debug_derive::RuntimeDebug;
+use sp_std::vec::Vec;
 
 #[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, TypeInfo)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub struct DAppInfo {
+	// dapp name
+	pub dapp_name: Vec<u8>,
 	// 对应的部署方法 index
 	pub method_index: u64,
 	// 属于哪个资源节点
@@ -16,8 +19,13 @@ pub struct DAppInfo {
 }
 
 impl DAppInfo {
-	fn new(method_index: u64, resource_index: u64, status: DappStatus) -> Self {
-		DAppInfo { method_index, resource_index, status }
+	pub fn new(
+		dapp_name: Vec<u8>,
+		method_index: u64,
+		resource_index: u64,
+		status: DappStatus,
+	) -> Self {
+		DAppInfo { dapp_name, method_index, resource_index, status }
 	}
 
 	// 重新分配资源节点
