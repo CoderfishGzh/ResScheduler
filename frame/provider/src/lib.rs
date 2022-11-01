@@ -16,7 +16,10 @@ type BalanceOf<T> =
 pub mod pallet {
 	use super::*;
 	use sp_hamster::{
-		p_dapp::DAppInfo, p_deployment::DeploymentInfo, p_provider::ComputingResource, Balance,
+		p_dapp::DAppInfo,
+		p_deployment::DeploymentInfo,
+		p_provider::{ComputingResource, ResourceConfig, ResourceStatus},
+		Balance,
 	};
 
 	/// Configure the pallet by specifying the parameters and types on which it depends.
@@ -61,7 +64,7 @@ pub mod pallet {
 	/// (资源index， 资源规格(cpu + mem))
 	#[pallet::storage]
 	#[pallet::getter(fn resource_rank)]
-	pub(super) type ResourceRank<T: Config> = StorageValue<_, (u64, u64), ValueQuery>;
+	pub(super) type ResourceRank<T: Config> = StorageValue<_, Vec<(u64, u64)>, ValueQuery>;
 
 	/// 部署信息index
 	#[pallet::storage]
@@ -119,6 +122,10 @@ pub mod pallet {
 	#[pallet::event]
 	#[pallet::generate_deposit(pub (super) fn deposit_event)]
 	pub enum Event<T: Config> {
+		/// register resource success
+		/// [AccountId, resource_index, cpu, memory]
+		RegisterResourceSuccess(T::AccountId, u64, u8, u8),
+
 		// 部署DApp
 		// (peer_id, cpu, memory, 启动方式 1是image:port 2是cid, command)
 		DeploymentDApp(Vec<u8>, u8, u8, u8, Vec<u8>),
@@ -137,8 +144,57 @@ pub mod pallet {
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
-		pub fn register_resource(account_id: OriginFor<T>, _peer_id: Vec<u8>) -> DispatchResult {
-			let _who = ensure_signed(account_id)?;
+		pub fn register_resource(
+			account_id: OriginFor<T>,
+			peer_id: Vec<u8>,
+			public_ip: Vec<u8>,
+			cpu: u8,
+			memory: u8,
+		) -> DispatchResult {
+			let who = ensure_signed(account_id)?;
+
+			let resource_index = ResourceIndex::<T>::get();
+			let resource_config = ResourceConfig::new(cpu, memory);
+			let computing_resource = ComputingResource::new(
+				resource_index,
+				who.clone(),
+				peer_id,
+				public_ip,
+				resource_config,
+				Vec::new(),
+				ResourceStatus::Online,
+			);
+
+			// 更新索引
+			ResourceIndex::<T>::put(resource_index.saturating_add(1));
+
+			// 记录资源信息
+			Resources::<T>::insert(resource_index, computing_resource);
+
+			// 更新用户拥有的信息
+			let mut user_resources =
+				UserResources::<T>::get(who.clone()).unwrap_or_else(|| Vec::new());
+			// 二分法找到插入下标
+			if let Err(size) = user_resources.binary_search(&resource_index) {
+				user_resources.insert(size, resource_index);
+				UserResources::<T>::insert(who.clone(), user_resources);
+			}
+
+			// 更新资源排序
+			let mut resource_rank = ResourceRank::<T>::get();
+			if let Err(size) = resource_rank.binary_search(&((cpu + memory) as u64, resource_index))
+			{
+				resource_rank.insert(size, ((cpu + memory) as u64, resource_index));
+				ResourceRank::<T>::set(resource_rank);
+			}
+
+			Self::deposit_event(Event::<T>::RegisterResourceSuccess(
+				who,
+				resource_index,
+				cpu,
+				memory,
+			));
+
 			Ok(())
 		}
 

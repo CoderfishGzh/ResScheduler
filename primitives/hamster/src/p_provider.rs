@@ -27,7 +27,7 @@ pub struct ComputingResource<AccountId> {
 }
 
 impl<AccountId> ComputingResource<AccountId> {
-	fn new(
+	pub fn new(
 		index: u64,
 		account_id: AccountId,
 		peer_id: Vec<u8>,
@@ -61,7 +61,7 @@ pub struct ResourceConfig {
 }
 
 impl ResourceConfig {
-	fn new(total_cpu: u8, total_memory: u8) -> Self {
+	pub fn new(total_cpu: u8, total_memory: u8) -> Self {
 		ResourceConfig { total_cpu, total_memory, unused_cpu: 0, unused_memory: 0 }
 	}
 
