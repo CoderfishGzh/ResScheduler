@@ -120,8 +120,8 @@ pub mod pallet {
 	#[pallet::generate_deposit(pub (super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		// 部署DApp
-		// (peer_id, cpu, memory, 启动方式)
-		DeploymentDApp(Vec<u8>, u8, u8, DeploymentInfo),
+		// (peer_id, cpu, memory, 启动方式 1是image:port 2是cid, command)
+		DeploymentDApp(Vec<u8>, u8, u8, u8, Vec<u8>),
 	}
 
 	#[pallet::hooks]

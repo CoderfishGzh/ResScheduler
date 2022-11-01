@@ -26,8 +26,8 @@ impl DeploymentInfo {
 #[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, TypeInfo)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub enum DeploymentMethod {
-	// (image， port）
-	Cli(Vec<u8>, u8),
+	// (image:port）
+	Cli(Vec<u8>),
 	// ipfs cid
 	Ipfs(Vec<u8>),
 }
