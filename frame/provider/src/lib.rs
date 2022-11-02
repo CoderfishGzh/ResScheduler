@@ -175,6 +175,8 @@ pub mod pallet {
 		NotHaveDApp,
 		/// 无效的dapp名字
 		InvaildDAppName,
+		/// dapp 重新分配资源部署失败
+		DAppRedistributionError,
 	}
 
 	#[pallet::call]
@@ -238,12 +240,46 @@ pub mod pallet {
 			Ok(())
 		}
 
+		/// 资源下线
+		/// 当资源没有被使用，直接下线
+		/// 当资源被使用了，将所有的dapp服务转移
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
-		pub fn offline_resource(account_id: OriginFor<T>, _peer_id: Vec<u8>) -> DispatchResult {
-			let _who = ensure_signed(account_id)?;
+		pub fn offline_resource(account_id: OriginFor<T>, resource_index: u64) -> DispatchResult {
+			let who = ensure_signed(account_id)?;
+
+			// 判断资源是否存在
+			ensure!(Resources::<T>::contains_key(resource_index), Error::<T>::InvaildResourceIndex,);
+
+			let resource = Resources::<T>::get(resource_index).unwrap();
+
+			// 判断资源是否属于who
+			ensure!(resource.account_id == who.clone(), Error::<T>::ResourceNotOwnedByAccount,);
+
+			// 处理资源包含的服务, 将服务重载至其他资源节点
+			ensure!(Self::re_deal_dapps(resource.dapps), Error::<T>::DAppRedistributionError,);
+
+			// 从 resource rank 调度队列删除该资源
+			// maybe bug
+			let resource_rank = ResourceRank::<T>::get()
+				.into_iter()
+				.filter(|r| r.1 != resource_index)
+				.collect::<Vec<(u64, u64)>>();
+			ResourceRank::<T>::put(resource_rank);
+
+			// 删除用户拥有的资源
+			let mut user_resources = UserResources::<T>::get(who.clone()).unwrap();
+			if let Ok(size) = user_resources.binary_search(&resource_index) {
+				user_resources.remove(size);
+			}
+			UserResources::<T>::insert(who.clone(), user_resources);
+
+			// 删除资源信息
+			Resources::<T>::remove(resource_index);
+
 			Ok(())
 		}
 
+		/// 资源进行心跳
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
 		pub fn resource_heartbeat(account_id: OriginFor<T>, resource_index: u64) -> DispatchResult {
 			let who = ensure_signed(account_id)?;
@@ -352,9 +388,7 @@ pub mod pallet {
 					let dapp = DApps::<T>::get(&dapp_index).unwrap();
 					(dapp_index, dapp)
 				},
-				Err(_) => {
-					return Err(Error::<T>::InvaildDAppName.into())
-				},
+				Err(_) => return Err(Error::<T>::InvaildDAppName.into()),
 			};
 
 			// 更新心跳时间
@@ -401,6 +435,11 @@ impl<T: Config> Pallet<T> {
 		DAppnameToIndex::<T>::insert(dapp_name, dapp_index);
 
 		true
+	}
+
+	/// 将 DApp 重新处理，分发到其他资源节点运行
+	fn re_deal_dapps(dapps: Vec<u64>) -> bool {
+		false
 	}
 
 	/// 返回分配的资源节点
