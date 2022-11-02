@@ -138,6 +138,10 @@ pub mod pallet {
 		// 部署DApp
 		// (peer_id, cpu, memory, 启动方式 1是image:port 2是cid, command)
 		DeploymentDApp(Vec<u8>, u8, u8, u8, Vec<u8>),
+
+		/// 资源心跳
+		/// [peer_id]
+		ResourceHeartbeat(Vec<u8>),
 	}
 
 	#[pallet::hooks]
@@ -155,6 +159,8 @@ pub mod pallet {
 		InstantiateError,
 		/// 无效的资源下标
 		InvaildResourceIndex,
+		/// 资源不属于用户
+		ResourceNotOwnedByAccount,
 	}
 
 	#[pallet::call]
@@ -233,10 +239,21 @@ pub mod pallet {
 				Error::<T>::InvaildResourceIndex,
 			);
 
-			let resource = Resources::<T>::get(resource_index).unwrap();
+			let mut resource = Resources::<T>::get(resource_index).unwrap();
 
 			// 判断资源是否属于用户
+			ensure!(
+				resource.account_id == who,
+				Error::<T>::ResourceNotOwnedByAccount,
+			);
 
+			// 获取系统时间
+			let block_number = <frame_system::Pallet<T>>::block_number();
+
+			// 更新心跳时间
+			resource.last_heartbeat = block_number;
+
+			Self::deposit_event(Event::<T>::ResourceHeartbeat(resource.peer_id));
 			Ok(())
 		}
 
