@@ -39,7 +39,16 @@ impl<AccountId, BlockNumber> ComputingResource<AccountId, BlockNumber> {
 		status: ResourceStatus,
 		last_heartbeat: BlockNumber,
 	) -> Self {
-		ComputingResource { index, account_id, peer_id, public_ip, config, dapps, status, last_heartbeat }
+		ComputingResource {
+			index,
+			account_id,
+			peer_id,
+			public_ip,
+			config,
+			dapps,
+			status,
+			last_heartbeat,
+		}
 	}
 }
 
@@ -71,7 +80,12 @@ pub struct ResourceConfig {
 
 impl ResourceConfig {
 	pub fn new(total_cpu: u8, total_memory: u8) -> Self {
-		ResourceConfig { total_cpu, total_memory, unused_cpu: total_cpu, unused_memory: total_memory }
+		ResourceConfig {
+			total_cpu,
+			total_memory,
+			unused_cpu: total_cpu,
+			unused_memory: total_memory,
+		}
 	}
 
 	// 使用资源

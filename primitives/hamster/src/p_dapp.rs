@@ -7,7 +7,7 @@ use sp_std::vec::Vec;
 
 #[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, TypeInfo)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
-pub struct DAppInfo {
+pub struct DAppInfo<BlockNumber> {
 	// dapp name
 	pub dapp_name: Vec<u8>,
 	// 对应的部署方法 index
@@ -16,16 +16,19 @@ pub struct DAppInfo {
 	pub resource_index: u64,
 	// 状态
 	pub status: DappStatus,
+	// 上一次心跳时间
+	pub last_heartbeat: BlockNumber,
 }
 
-impl DAppInfo {
+impl<BlockNumber> DAppInfo<BlockNumber> {
 	pub fn new(
 		dapp_name: Vec<u8>,
 		method_index: u64,
 		resource_index: u64,
 		status: DappStatus,
+		last_heartbeat: BlockNumber,
 	) -> Self {
-		DAppInfo { dapp_name, method_index, resource_index, status }
+		DAppInfo { dapp_name, method_index, resource_index, status, last_heartbeat }
 	}
 
 	// 重新分配资源节点

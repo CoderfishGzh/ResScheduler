@@ -51,8 +51,13 @@ pub mod pallet {
 	/// 资源信息
 	#[pallet::storage]
 	#[pallet::getter(fn resource)]
-	pub(super) type Resources<T: Config> =
-		StorageMap<_, Twox64Concat, u64, ComputingResource<T::AccountId, T::BlockNumber>, OptionQuery>;
+	pub(super) type Resources<T: Config> = StorageMap<
+		_,
+		Twox64Concat,
+		u64,
+		ComputingResource<T::AccountId, T::BlockNumber>,
+		OptionQuery,
+	>;
 
 	/// 用户拥有的资源
 	#[pallet::storage]
@@ -87,7 +92,8 @@ pub mod pallet {
 	/// [index, info]
 	#[pallet::storage]
 	#[pallet::getter(fn dapps)]
-	pub(super) type DApps<T: Config> = StorageMap<_, Twox64Concat, u64, DAppInfo, OptionQuery>;
+	pub(super) type DApps<T: Config> =
+		StorageMap<_, Twox64Concat, u64, DAppInfo<T::BlockNumber>, OptionQuery>;
 
 	/// 用户拥有的DApp
 	/// [user, dapp_name]
@@ -105,7 +111,7 @@ pub mod pallet {
 	// The genesis config type.
 	#[pallet::genesis_config]
 	pub struct GenesisConfig<T: Config> {
-		pub resource: Vec<(u64, ComputingResource<T::AccountId,T::BlockNumber>)>,
+		pub resource: Vec<(u64, ComputingResource<T::AccountId, T::BlockNumber>)>,
 		pub resource_index: u64,
 	}
 
@@ -142,6 +148,10 @@ pub mod pallet {
 		/// 资源心跳
 		/// [peer_id]
 		ResourceHeartbeat(Vec<u8>),
+
+		/// DApp 心跳
+		/// [account_id, dapp_name]
+		DAppHeartbeat(T::AccountId, Vec<u8>),
 	}
 
 	#[pallet::hooks]
@@ -161,6 +171,10 @@ pub mod pallet {
 		InvaildResourceIndex,
 		/// 资源不属于用户
 		ResourceNotOwnedByAccount,
+		/// 用户没有部署过的dapp
+		NotHaveDApp,
+		/// 无效的dapp名字
+		InvaildDAppName,
 	}
 
 	#[pallet::call]
@@ -234,18 +248,12 @@ pub mod pallet {
 		pub fn resource_heartbeat(account_id: OriginFor<T>, resource_index: u64) -> DispatchResult {
 			let who = ensure_signed(account_id)?;
 
-			ensure!(
-				Resources::<T>::contains_key(resource_index),
-				Error::<T>::InvaildResourceIndex,
-			);
+			ensure!(Resources::<T>::contains_key(resource_index), Error::<T>::InvaildResourceIndex,);
 
 			let mut resource = Resources::<T>::get(resource_index).unwrap();
 
 			// 判断资源是否属于用户
-			ensure!(
-				resource.account_id == who,
-				Error::<T>::ResourceNotOwnedByAccount,
-			);
+			ensure!(resource.account_id == who, Error::<T>::ResourceNotOwnedByAccount,);
 
 			// 获取系统时间
 			let block_number = <frame_system::Pallet<T>>::block_number();
@@ -330,8 +338,33 @@ pub mod pallet {
 		}
 
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
-		pub fn dapp_heartbeat(account_id: OriginFor<T>, _peer_id: Vec<u8>) -> DispatchResult {
-			let _who = ensure_signed(account_id)?;
+		pub fn dapp_heartbeat(account_id: OriginFor<T>, dapp_name: Vec<u8>) -> DispatchResult {
+			let who = ensure_signed(account_id)?;
+
+			// 判断是否拥有这个dapp
+			ensure!(UserDApps::<T>::contains_key(who.clone()), Error::<T>::NotHaveDApp,);
+
+			let user_dapps = UserDApps::<T>::get(who.clone()).unwrap();
+
+			let (dapp_index, mut dapp) = match user_dapps.binary_search(dapp_name.as_ref()) {
+				Ok(size) => {
+					let dapp_index = DAppnameToIndex::<T>::get(&user_dapps[size]).unwrap();
+					let dapp = DApps::<T>::get(&dapp_index).unwrap();
+					(dapp_index, dapp)
+				},
+				Err(_) => {
+					return Err(Error::<T>::InvaildDAppName.into())
+				},
+			};
+
+			// 更新心跳时间
+			let block_number = <frame_system::Pallet<T>>::block_number();
+			dapp.last_heartbeat = block_number;
+
+			// 记录dapp信息
+			DApps::<T>::insert(dapp_index, dapp);
+
+			Self::deposit_event(Event::<T>::DAppHeartbeat(who, dapp_name));
 			Ok(())
 		}
 	}
@@ -349,9 +382,17 @@ impl<T: Config> Pallet<T> {
 		// 分配 dapp index
 		let dapp_index = DeploymentIndex::<T>::get();
 
+		// 获取时间
+		let block_number = <frame_system::Pallet<T>>::block_number();
+
 		// 创建 dapp
-		let dapp =
-			DAppInfo::new(dapp_name.clone(), deployment_index, resource_index, DappStatus::Online);
+		let dapp = DAppInfo::new(
+			dapp_name.clone(),
+			deployment_index,
+			resource_index,
+			DappStatus::Online,
+			block_number,
+		);
 
 		// 记录 dapp信息
 		DApps::<T>::insert(dapp_index, dapp);
