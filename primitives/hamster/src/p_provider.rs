@@ -8,7 +8,7 @@ use sp_std::vec::Vec;
 /// ComputingResources
 #[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, TypeInfo, Default)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
-pub struct ComputingResource<AccountId> {
+pub struct ComputingResource<AccountId, BlockNumber> {
 	// 资源索引
 	pub index: u64,
 	// 资源拥有者
@@ -24,9 +24,11 @@ pub struct ComputingResource<AccountId> {
 	pub dapps: Vec<u64>,
 	// 资源在线状态
 	pub status: ResourceStatus,
+	// 上一次心跳时间
+	pub last_heartbeat: BlockNumber,
 }
 
-impl<AccountId> ComputingResource<AccountId> {
+impl<AccountId, BlockNumber> ComputingResource<AccountId, BlockNumber> {
 	pub fn new(
 		index: u64,
 		account_id: AccountId,
@@ -35,8 +37,9 @@ impl<AccountId> ComputingResource<AccountId> {
 		config: ResourceConfig,
 		dapps: Vec<u64>,
 		status: ResourceStatus,
+		last_heartbeat: BlockNumber,
 	) -> Self {
-		ComputingResource { index, account_id, peer_id, public_ip, config, dapps, status }
+		ComputingResource { index, account_id, peer_id, public_ip, config, dapps, status, last_heartbeat }
 	}
 }
 
@@ -68,7 +71,7 @@ pub struct ResourceConfig {
 
 impl ResourceConfig {
 	pub fn new(total_cpu: u8, total_memory: u8) -> Self {
-		ResourceConfig { total_cpu, total_memory, unused_cpu: 0, unused_memory: 0 }
+		ResourceConfig { total_cpu, total_memory, unused_cpu: total_cpu, unused_memory: total_memory }
 	}
 
 	// 使用资源

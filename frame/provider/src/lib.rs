@@ -52,7 +52,7 @@ pub mod pallet {
 	#[pallet::storage]
 	#[pallet::getter(fn resource)]
 	pub(super) type Resources<T: Config> =
-		StorageMap<_, Twox64Concat, u64, ComputingResource<T::AccountId>, OptionQuery>;
+		StorageMap<_, Twox64Concat, u64, ComputingResource<T::AccountId, T::BlockNumber>, OptionQuery>;
 
 	/// 用户拥有的资源
 	#[pallet::storage]
@@ -105,7 +105,7 @@ pub mod pallet {
 	// The genesis config type.
 	#[pallet::genesis_config]
 	pub struct GenesisConfig<T: Config> {
-		pub resource: Vec<(u64, ComputingResource<T::AccountId>)>,
+		pub resource: Vec<(u64, ComputingResource<T::AccountId,T::BlockNumber>)>,
 		pub resource_index: u64,
 	}
 
@@ -153,10 +153,13 @@ pub mod pallet {
 		RepeatDAppName,
 		/// 实例化DApp失败
 		InstantiateError,
+		/// 无效的资源下标
+		InvaildResourceIndex,
 	}
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
+		/// Demo 版本，没有做资源重复的处理
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
 		pub fn register_resource(
 			account_id: OriginFor<T>,
@@ -169,6 +172,8 @@ pub mod pallet {
 
 			let resource_index = ResourceIndex::<T>::get();
 			let resource_config = ResourceConfig::new(cpu, memory);
+			// get the current block height
+			let block_number = <frame_system::Pallet<T>>::block_number();
 			let computing_resource = ComputingResource::new(
 				resource_index,
 				who.clone(),
@@ -177,6 +182,7 @@ pub mod pallet {
 				resource_config,
 				Vec::new(),
 				ResourceStatus::Online,
+				block_number,
 			);
 
 			// 更新索引
@@ -219,8 +225,18 @@ pub mod pallet {
 		}
 
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
-		pub fn resource_heartbeat(account_id: OriginFor<T>, _peer_id: Vec<u8>) -> DispatchResult {
-			let _who = ensure_signed(account_id)?;
+		pub fn resource_heartbeat(account_id: OriginFor<T>, resource_index: u64) -> DispatchResult {
+			let who = ensure_signed(account_id)?;
+
+			ensure!(
+				Resources::<T>::contains_key(resource_index),
+				Error::<T>::InvaildResourceIndex,
+			);
+
+			let resource = Resources::<T>::get(resource_index).unwrap();
+
+			// 判断资源是否属于用户
+
 			Ok(())
 		}
 
@@ -260,7 +276,7 @@ pub mod pallet {
 			// 实例化 Dapp
 			ensure!(
 				Self::instantiate(dapp_name.clone(), deployment_index, cpu, memory),
-				Error::<T>::RepeatDAppName,
+				Error::<T>::InstantiateError,
 			);
 
 			// 更新用户的 实例DApp 列表
@@ -356,6 +372,8 @@ impl<T: Config> Pallet<T> {
 				break
 			}
 		}
+
+		log::info!("enable {:?}", enable);
 
 		// 没有找到符合的节点
 		if !enable {
