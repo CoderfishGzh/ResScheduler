@@ -159,6 +159,10 @@ pub mod pallet {
 		/// 部署失败
 		/// [部署失败的DApp name]
 		DAppRedistribution(Vec<Vec<u8>>),
+
+		/// 结束dapp成功
+		/// [accoutId, dapp_name, dapp_index]
+		EndDAppSuccess(T::AccountId, Vec<u8>, u64),
 	}
 
 	#[pallet::hooks]
@@ -184,6 +188,8 @@ pub mod pallet {
 		InvaildDAppName,
 		/// dapp 重新分配资源部署失败
 		DAppRedistributionError,
+		/// 无效的dapp index
+		InvaildDAppIndex,
 	}
 
 	#[pallet::call]
@@ -379,8 +385,55 @@ pub mod pallet {
 		}
 
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
-		pub fn end_dapp_deployment(account_id: OriginFor<T>, _peer_id: Vec<u8>) -> DispatchResult {
-			let _who = ensure_signed(account_id)?;
+		pub fn end_dapp_deployment(account_id: OriginFor<T>, dapp_index: u64) -> DispatchResult {
+			let who = ensure_signed(account_id)?;
+
+			// dapp 信息是否存在
+			let dapp = match DApps::<T>::get(dapp_index) {
+				Some(app) => app,
+				None => return Err(Error::<T>::InvaildDAppIndex.into()),
+			};
+
+			let dapp_name = dapp.dapp_name;
+
+			// 判断用户是否拥有这个dapp
+			ensure!(UserDApps::<T>::contains_key(who.clone()), Error::<T>::NotHaveDApp,);
+
+			let mut user_dapps = UserDApps::<T>::get(who.clone()).unwrap();
+
+			ensure!(user_dapps.contains(dapp_name.as_ref()), Error::<T>::NotHaveDApp,);
+
+			// 从用户拥有的DApp数组删除
+			user_dapps = user_dapps
+				.into_iter()
+				.filter(|dapp| dapp != &dapp_name)
+				.collect::<Vec<Vec<u8>>>();
+
+			UserDApps::<T>::insert(who.clone(), user_dapps);
+
+			// 将 DApp 信息删除
+			DApps::<T>::remove(dapp_index);
+
+			// 将 DApp name 和 index 映射 删除
+			DAppnameToIndex::<T>::remove(dapp_name.clone());
+
+			// 从资源的包含的DApp删除
+			let resource_index = dapp.resource_index;
+			let mut resource = Resources::<T>::get(resource_index).unwrap();
+			let resource_dapps = resource
+				.dapps
+				.into_iter()
+				.filter(|index| index != &resource_index)
+				.collect::<Vec<u64>>();
+			resource.dapps = resource_dapps;
+			Resources::<T>::insert(resource_index, resource);
+
+			Self::deposit_event(Event::<T>::EndDAppSuccess(
+				who.clone(),
+				dapp_name.clone(),
+				dapp_index,
+			));
+
 			Ok(())
 		}
 
