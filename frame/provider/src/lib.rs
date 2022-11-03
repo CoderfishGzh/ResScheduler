@@ -9,7 +9,10 @@ use frame_system::pallet_prelude::*;
 use sp_std::{convert::TryInto, vec::Vec};
 
 pub use pallet::*;
-use sp_hamster::p_dapp::{DAppInfo, DappStatus};
+use sp_hamster::{
+	p_dapp::{DAppInfo, DappStatus},
+	p_deployment::DeploymentMethod,
+};
 
 type BalanceOf<T> =
 	<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
@@ -142,8 +145,8 @@ pub mod pallet {
 		RegisterResourceSuccess(T::AccountId, u64, u8, u8),
 
 		// 部署DApp
-		// (peer_id, cpu, memory, 启动方式 1是image:port 2是cid, command)
-		DeploymentDApp(Vec<u8>, u8, u8, u8, Vec<u8>),
+		// (peer_id, cpu, memory, 启动方式 1是image:port 2是cid, command, dapp_index)
+		DeploymentDApp(Vec<u8>, u8, u8, u8, Vec<u8>, u64),
 
 		/// 资源心跳
 		/// [peer_id]
@@ -152,6 +155,10 @@ pub mod pallet {
 		/// DApp 心跳
 		/// [account_id, dapp_name]
 		DAppHeartbeat(T::AccountId, Vec<u8>),
+
+		/// 部署失败
+		/// [部署失败的DApp name]
+		DAppRedistribution(Vec<Vec<u8>>),
 	}
 
 	#[pallet::hooks]
@@ -256,7 +263,10 @@ pub mod pallet {
 			ensure!(resource.account_id == who.clone(), Error::<T>::ResourceNotOwnedByAccount,);
 
 			// 处理资源包含的服务, 将服务重载至其他资源节点
-			ensure!(Self::re_deal_dapps(resource.dapps), Error::<T>::DAppRedistributionError,);
+			match Self::re_deal_dapps(resource.dapps, who.clone()) {
+				None => {},
+				Some(failed) => Self::deposit_event(Event::<T>::DAppRedistribution(failed)),
+			}
 
 			// 从 resource rank 调度队列删除该资源
 			// maybe bug
@@ -305,7 +315,6 @@ pub mod pallet {
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
 		pub fn request_dapp_deployment(
 			account_id: OriginFor<T>,
-			peer_id: Vec<u8>,
 			method: DeploymentMethod,
 			dapp_name: Vec<u8>,
 			cpu: u8,
@@ -335,10 +344,13 @@ pub mod pallet {
 			DeploymentIndex::<T>::put(deployment_index.saturating_add(1));
 
 			// 实例化 Dapp
-			ensure!(
-				Self::instantiate(dapp_name.clone(), deployment_index, cpu, memory),
-				Error::<T>::InstantiateError,
-			);
+			let (resource_index, dapp_index) =
+				match Self::instantiate(dapp_name.clone(), deployment_index, cpu, memory) {
+					Some(info) => info,
+					None => return Err(Error::<T>::InstantiateError.into()),
+				};
+			// 拿到 resource 的 peer_id
+			let resource_peer_id = Resources::<T>::get(resource_index).unwrap().peer_id;
 
 			// 更新用户的 实例DApp 列表
 			let mut user_dapps = UserDApps::<T>::get(who.clone()).unwrap_or_else(|| Vec::new());
@@ -353,7 +365,15 @@ pub mod pallet {
 				DeploymentMethod::Ipfs(i) => (2, i.clone()),
 			};
 
-			Self::deposit_event(Event::<T>::DeploymentDApp(peer_id, cpu, memory, m, command));
+			// 资源(peer_id, cpu, memory, type, command, dapp_index)
+			Self::deposit_event(Event::<T>::DeploymentDApp(
+				resource_peer_id,
+				cpu,
+				memory,
+				m,
+				command,
+				dapp_index,
+			));
 
 			Ok(())
 		}
@@ -406,15 +426,22 @@ pub mod pallet {
 
 impl<T: Config> Pallet<T> {
 	/// 实例化 Dapp
-	fn instantiate(dapp_name: Vec<u8>, deployment_index: u64, cpu: u8, memory: u8) -> bool {
+	/// 返回 Some(resource_index, dapp_index)
+	fn instantiate(
+		dapp_name: Vec<u8>,
+		deployment_index: u64,
+		cpu: u8,
+		memory: u8,
+	) -> Option<(u64, u64)> {
 		// 分配资源节点
 		let resource_index = match Self::allocate_resource_node(cpu, memory) {
 			Some(index) => index,
-			None => return false,
+			None => return None,
 		};
 
 		// 分配 dapp index
-		let dapp_index = DeploymentIndex::<T>::get();
+		let dapp_index = DAppIndex::<T>::get();
+		DAppIndex::<T>::put(dapp_index + 1);
 
 		// 获取时间
 		let block_number = <frame_system::Pallet<T>>::block_number();
@@ -431,15 +458,63 @@ impl<T: Config> Pallet<T> {
 		// 记录 dapp信息
 		DApps::<T>::insert(dapp_index, dapp);
 
-		// 记录 dapp 名字 对应的 index
+		// 记录\更新 dapp 名字 对应的 index
 		DAppnameToIndex::<T>::insert(dapp_name, dapp_index);
 
-		true
+		Some((resource_index, dapp_index))
 	}
 
 	/// 将 DApp 重新处理，分发到其他资源节点运行
-	fn re_deal_dapps(dapps: Vec<u64>) -> bool {
-		false
+	/// 返回分发失败的 DApp名字
+	fn re_deal_dapps(dapps: Vec<u64>, who: T::AccountId) -> Option<Vec<Vec<u8>>> {
+		// 调度失败的名单
+		let mut failed_dapps = Vec::new();
+
+		for dapp_index in dapps {
+			// 拿到 dapp 信息
+			let dapp = DApps::<T>::get(dapp_index).unwrap();
+
+			let dapp_name = dapp.dapp_name;
+
+			let method_index = dapp.method_index;
+
+			let method = Deployments::<T>::get(method_index).unwrap();
+
+			let (resource_index, dapp_index) =
+				match Self::instantiate(dapp_name.clone(), method_index, method.cpu, method.memory)
+				{
+					Some(info) => info,
+					None => {
+						failed_dapps.push(dapp_name.clone());
+						continue
+					},
+				};
+
+			// 获取资源peer_id
+			let resource_peer_id = Resources::<T>::get(resource_index).unwrap().peer_id;
+
+			// 判断部署方法
+			let (m, command) = match &method.method {
+				DeploymentMethod::Cli(c) => (1, c.clone()),
+				DeploymentMethod::Ipfs(i) => (2, i.clone()),
+			};
+
+			// 资源(peer_id, cpu, memory, type, command, dapp_index)
+			Self::deposit_event(Event::<T>::DeploymentDApp(
+				resource_peer_id,
+				method.cpu,
+				method.memory,
+				m,
+				command,
+				dapp_index,
+			));
+		}
+
+		if failed_dapps.is_empty() {
+			return None
+		}
+
+		Some(failed_dapps)
 	}
 
 	/// 返回分配的资源节点
