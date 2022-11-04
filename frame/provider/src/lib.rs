@@ -12,10 +12,15 @@ pub use pallet::*;
 use sp_hamster::{
 	p_dapp::{DAppInfo, DappStatus},
 	p_deployment::DeploymentMethod,
+	p_provider::ComputingResource,
 };
 
 type BalanceOf<T> =
 	<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
+
+/// 心跳间隔300个区块，即30分钟
+/// 超过30分钟，判定为超时
+const HEARTBEAT_INTERVAL: u32 = 300u32;
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -168,6 +173,20 @@ pub mod pallet {
 	#[pallet::hooks]
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
 		fn on_initialize(now: T::BlockNumber) -> Weight {
+			// 获取资源列表
+			let resource: Vec<(u64, ComputingResource<T::AccountId, T::BlockNumber>)> =
+				Resources::<T>::iter().collect();
+
+			let failed_resource_index = match Self::check_heartbeat_timeout(now, resource) {
+				Some(i) => i,
+				None => return T::DbWeight::get().reads_writes(1, 1),
+			};
+
+			// 将下线资源的包含的DApp进行资源节点转移(留给offchainworker)
+
+			// 处理资源信息(留给offchainworker)
+
+
 			T::DbWeight::get().reads_writes(1, 1)
 		}
 	}
@@ -190,6 +209,8 @@ pub mod pallet {
 		DAppRedistributionError,
 		/// 无效的dapp index
 		InvaildDAppIndex,
+		/// 处理下线资源信息出错
+		ClearDownlineResourceInformation,
 	}
 
 	#[pallet::call]
@@ -274,23 +295,9 @@ pub mod pallet {
 				Some(failed) => Self::deposit_event(Event::<T>::DAppRedistribution(failed)),
 			}
 
-			// 从 resource rank 调度队列删除该资源
-			// maybe bug
-			let resource_rank = ResourceRank::<T>::get()
-				.into_iter()
-				.filter(|r| r.1 != resource_index)
-				.collect::<Vec<(u64, u64)>>();
-			ResourceRank::<T>::put(resource_rank);
-
-			// 删除用户拥有的资源
-			let mut user_resources = UserResources::<T>::get(who.clone()).unwrap();
-			if let Ok(size) = user_resources.binary_search(&resource_index) {
-				user_resources.remove(size);
+			if !Self::clear_downline_resource_information(resource_index, who.clone()) {
+				return Err(Error::<T>::ClearDownlineResourceInformation.into())
 			}
-			UserResources::<T>::insert(who.clone(), user_resources);
-
-			// 删除资源信息
-			Resources::<T>::remove(resource_index);
 
 			Ok(())
 		}
@@ -621,5 +628,58 @@ impl<T: Config> Pallet<T> {
 		Resources::<T>::insert(resource_node_index, ret);
 
 		Some(resource_node_index)
+	}
+
+	// 检查超时心跳的资源
+	// 返回超时的资源节点
+	fn check_heartbeat_timeout(
+		now: T::BlockNumber,
+		resources: Vec<(u64, ComputingResource<T::AccountId, T::BlockNumber>)>,
+	) -> Option<Vec<u64>> {
+		let mut ret: Vec<u64> = Vec::new();
+		for (resouece_idnex, resource) in resources {
+			let last_heartbeat = resource.last_heartbeat;
+			let interval = now - last_heartbeat;
+			// 超时
+			if interval > HEARTBEAT_INTERVAL.into() {
+				// 统计资源index
+				ret.push(resouece_idnex);
+			}
+		}
+
+		if ret.is_empty() {
+			return None
+		}
+		Some(ret)
+	}
+
+	/// 处理下线资源
+	/// * 从resource rank调度队列删除资源
+	/// * 删除用户拥有的资源
+	/// * 删除资源信息
+	fn clear_downline_resource_information(resource_index: u64, who: T::AccountId) -> bool {
+		if !Resources::<T>::contains_key(resource_index) {
+			return false
+		}
+
+		// 从 resource rank 调度队列删除该资源
+		// maybe bug
+		let resource_rank = ResourceRank::<T>::get()
+			.into_iter()
+			.filter(|r| r.1 != resource_index)
+			.collect::<Vec<(u64, u64)>>();
+		ResourceRank::<T>::put(resource_rank);
+
+		// 删除用户拥有的资源
+		let mut user_resources = UserResources::<T>::get(who.clone()).unwrap();
+		if let Ok(size) = user_resources.binary_search(&resource_index) {
+			user_resources.remove(size);
+		}
+		UserResources::<T>::insert(who.clone(), user_resources);
+
+		// 删除资源信息
+		Resources::<T>::remove(resource_index);
+
+		true
 	}
 }

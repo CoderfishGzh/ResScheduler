@@ -50,6 +50,28 @@ impl<AccountId, BlockNumber> ComputingResource<AccountId, BlockNumber> {
 			last_heartbeat,
 		}
 	}
+
+	// 增加DApp
+	fn add_dapp(&mut self, dapp_index: u64) -> bool {
+		match self.dapps.binary_search(&dapp_index) {
+			Ok(_) => false,
+			Err(size) => {
+				self.dapps.insert(size, dapp_index);
+				true
+			},
+		}
+	}
+
+	// 删除DApp
+	fn remove_dapp(&mut self, dapp_index: u64) -> bool {
+		match self.dapps.binary_search(&dapp_index) {
+			Ok(size) => {
+				self.dapps.remove(size);
+				true
+			},
+			Err(_) => false,
+		}
+	}
 }
 
 #[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, TypeInfo)]
@@ -100,17 +122,17 @@ impl ResourceConfig {
 	}
 
 	// 释放资源
-	fn _release_resource(&self, _cpu: u8, _memory: u8) -> bool {
-		false
-	}
+	fn release_resource(&mut self, cpu: u8, memory: u8) -> bool {
+		let used_cpu = self.total_cpu.saturating_sub(self.unused_cpu);
+		let used_memory = self.total_memory.saturating_sub(self.unused_memory);
 
-	// 增加DApp
-	fn _add_dapp(&self, _dapp_index: u64) -> bool {
-		false
-	}
+		if cpu > used_cpu || memory > used_memory {
+			return false
+		}
 
-	// 删除DApp
-	fn _remove_dapp(&self, _dapp_index: u64) -> bool {
-		false
+		self.unused_cpu = self.unused_cpu.saturating_add(cpu);
+		self.unused_memory = self.unused_memory.saturating_add(memory);
+
+		true
 	}
 }
