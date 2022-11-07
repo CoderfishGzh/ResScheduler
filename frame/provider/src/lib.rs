@@ -293,7 +293,7 @@ pub mod pallet {
 			ensure!(resource.account_id == who.clone(), Error::<T>::ResourceNotOwnedByAccount,);
 
 			// 处理资源包含的服务, 将服务重载至其他资源节点
-			match Self::re_deal_dapps(resource.dapps, who.clone()) {
+			match Self::re_deal_dapps(resource.dapps) {
 				None => {},
 				Some(failed) => Self::deposit_event(Event::<T>::DAppRedistribution(failed)),
 			}
@@ -609,7 +609,7 @@ impl<T: Config> Pallet<T> {
 
 	/// 将 DApp 重新处理，分发到其他资源节点运行
 	/// 返回分发失败的 DApp名字
-	fn re_deal_dapps(dapps: Vec<u64>, who: T::AccountId) -> Option<Vec<Vec<u8>>> {
+	fn re_deal_dapps(dapps: Vec<u64>) -> Option<Vec<Vec<u8>>> {
 		// 调度失败的名单
 		let mut failed_dapps = Vec::new();
 
@@ -672,7 +672,7 @@ impl<T: Config> Pallet<T> {
 
 		let mut ret = Resources::<T>::get(resource_rank[0].1).unwrap();
 
-		for (i, (points, node_index)) in resource_rank.iter().enumerate() {
+		for (i, (_, node_index)) in resource_rank.iter().enumerate() {
 			// 寻找满足要求的节点
 			let mut resource = Resources::<T>::get(node_index).unwrap();
 			if resource.config.use_resource(cpu, memory) {
