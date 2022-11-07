@@ -101,7 +101,7 @@ pub mod pallet {
 	#[pallet::storage]
 	#[pallet::getter(fn dapps)]
 	pub(super) type DApps<T: Config> =
-		StorageMap<_, Twox64Concat, u64, DAppInfo<T::BlockNumber>, OptionQuery>;
+		StorageMap<_, Twox64Concat, u64, DAppInfo<T::AccountId, T::BlockNumber>, OptionQuery>;
 
 	/// 用户拥有的DApp
 	/// [user, dapp_name]
@@ -183,7 +183,7 @@ pub mod pallet {
 
 			// 检查获取心跳超时的dapp
 			// 目前的做法是，将心跳超时的 dapp 直接停掉
-			let dapps: Vec<(u64, DAppInfo<T::BlockNumber>)> = DApps::<T>::iter().collect();
+			let dapps: Vec<(u64, DAppInfo<T::AccountId, T::BlockNumber>)> = DApps::<T>::iter().collect();
 			let failed_dapp_indexs = match Self::check_and_get_heartbeat_timeout(now, dapps) {
 				Some(i) => i,
 				None => Vec::new(),
@@ -379,7 +379,7 @@ pub mod pallet {
 
 			// 实例化 Dapp
 			let (resource_index, dapp_index) =
-				match Self::instantiate(dapp_name.clone(), deployment_index, cpu, memory) {
+				match Self::instantiate(who.clone(), dapp_name.clone(), deployment_index, cpu, memory) {
 					Some(info) => info,
 					None => return Err(Error::<T>::InstantiateError.into()),
 				};
@@ -499,7 +499,7 @@ pub mod pallet {
 
 			// 实例化dapp
 			let (resource_index, dapp_index) =
-				match Self::instantiate(dapp_name.clone(), deployment_index, cpu, memory) {
+				match Self::instantiate(who.clone(), dapp_name.clone(), deployment_index, cpu, memory) {
 					Some(info) => info,
 					None => return Err(Error::<T>::InstantiateError.into()),
 				};
@@ -560,6 +560,7 @@ impl<T: Config> Pallet<T> {
 	/// 实例化 Dapp
 	/// 返回 Some(resource_index, dapp_index)
 	fn instantiate(
+		account: T::AccountId,
 		dapp_name: Vec<u8>,
 		deployment_index: u64,
 		cpu: u8,
@@ -580,6 +581,7 @@ impl<T: Config> Pallet<T> {
 
 		// 创建 dapp
 		let dapp = DAppInfo::new(
+			account,
 			dapp_name.clone(),
 			deployment_index,
 			resource_index,
@@ -613,7 +615,7 @@ impl<T: Config> Pallet<T> {
 			let method = Deployments::<T>::get(method_index).unwrap();
 
 			let (resource_index, dapp_index) =
-				match Self::instantiate(dapp_name.clone(), method_index, method.cpu, method.memory)
+				match Self::instantiate(dapp.account, dapp_name.clone(), method_index, method.cpu, method.memory)
 				{
 					Some(info) => info,
 					None => {
@@ -772,7 +774,7 @@ impl<T: Config> Pallet<T> {
 
 	fn check_and_get_heartbeat_timeout(
 		now: T::BlockNumber,
-		dapps: Vec<(u64, DAppInfo<T::BlockNumber>)>,
+		dapps: Vec<(u64, DAppInfo<T::AccountId, T::BlockNumber>)>,
 	) -> Option<Vec<u64>> {
 		let mut ret: Vec<u64> = Vec::new();
 
@@ -828,5 +830,11 @@ impl<T: Config> Pallet<T> {
 	}
 
 	/// 处理心跳超时的dapp
-	fn deal_timeout_dapps(dapps: Vec<u64>) {}
+	fn deal_timeout_dapps(dapps: Vec<u64>) {
+		if dapps.is_empty() {
+			return;
+		}
+
+
+	}
 }
