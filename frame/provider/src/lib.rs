@@ -154,8 +154,8 @@ pub mod pallet {
 		DeploymentDApp(Vec<u8>, u8, u8, u8, Vec<u8>, u64),
 
 		/// 资源心跳
-		/// [peer_id]
-		ResourceHeartbeat(Vec<u8>),
+		/// [peer_id, dapps]
+		ResourceHeartbeat(Vec<u8>, Vec<u64>),
 
 		/// DApp 心跳
 		/// [account_id, dapp_name]
@@ -306,8 +306,13 @@ pub mod pallet {
 		}
 
 		/// 资源进行心跳
+		/// 更新资源心跳时间 以及 dapp心跳时间
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
-		pub fn resource_heartbeat(account_id: OriginFor<T>, resource_index: u64) -> DispatchResult {
+		pub fn resource_heartbeat(
+			account_id: OriginFor<T>,
+			resource_index: u64,
+			dapps: Vec<u64>,
+		) -> DispatchResult {
 			let who = ensure_signed(account_id)?;
 
 			ensure!(Resources::<T>::contains_key(resource_index), Error::<T>::InvaildResourceIndex,);
@@ -320,10 +325,13 @@ pub mod pallet {
 			// 获取系统时间
 			let block_number = <frame_system::Pallet<T>>::block_number();
 
-			// 更新心跳时间
+			// 更新资源心跳时间
 			resource.last_heartbeat = block_number;
 
-			Self::deposit_event(Event::<T>::ResourceHeartbeat(resource.peer_id));
+			// 更新dapp心跳时间
+			Self::update_dapp_heartbeat_time(dapps.clone());
+
+			Self::deposit_event(Event::<T>::ResourceHeartbeat(resource.peer_id, dapps));
 			Ok(())
 		}
 
@@ -756,5 +764,20 @@ impl<T: Config> Pallet<T> {
 		Resources::<T>::remove(resource_index);
 
 		true
+	}
+
+	/// 更新dapp的上一次心跳时间
+	fn update_dapp_heartbeat_time(dapps: Vec<u64>) {
+		// 获取时间
+		let block_number = <frame_system::Pallet<T>>::block_number();
+		for dapp_index in dapps {
+			let mut dapp = match DApps::<T>::get(dapp_index) {
+				None => continue,
+				Some(app) => app,
+			};
+
+			dapp.last_heartbeat = block_number;
+			DApps::<T>::insert(dapp_index, dapp);
+		}
 	}
 }
