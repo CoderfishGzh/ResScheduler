@@ -191,14 +191,20 @@ pub mod pallet {
 			// 处理心跳超时的 dapp
 			Self::deal_timeout_dapps(failed_dapp_indexs);
 
-			let failed_resource_index = match Self::check_heartbeat_timeout(now, resource) {
+			let failed_resource_indexs = match Self::check_heartbeat_timeout(now, resource) {
 				Some(i) => i,
 				None => return T::DbWeight::get().reads_writes(1, 1),
 			};
 
 			// 将下线资源的包含的DApp进行资源节点转移(留给offchainworker)
+			if let Some(dapps_name) = Self::re_deal_dapps(failed_resource_indexs.clone()) {
+				Self::deposit_event(Event::<T>::DAppRedistribution(dapps_name));
+			}
 
 			// 处理资源信息(留给offchainworker)
+			for failed_resource_index in failed_resource_indexs {
+				Self::clear_downline_resource_information(failed_resource_index);
+			}
 
 			T::DbWeight::get().reads_writes(1, 1)
 		}
@@ -308,7 +314,7 @@ pub mod pallet {
 				Some(failed) => Self::deposit_event(Event::<T>::DAppRedistribution(failed)),
 			}
 
-			if !Self::clear_downline_resource_information(resource_index, who.clone()) {
+			if !Self::clear_downline_resource_information(resource_index) {
 				return Err(Error::<T>::ClearDownlineResourceInformation.into())
 			}
 
@@ -731,10 +737,11 @@ impl<T: Config> Pallet<T> {
 	/// * 从resource rank调度队列删除资源
 	/// * 删除用户拥有的资源
 	/// * 删除资源信息
-	fn clear_downline_resource_information(resource_index: u64, who: T::AccountId) -> bool {
+	fn clear_downline_resource_information(resource_index: u64) -> bool {
 		if !Resources::<T>::contains_key(resource_index) {
 			return false
 		}
+		let resource = Resources::<T>::get(resource_index).unwrap();
 
 		// 从 resource rank 调度队列删除该资源
 		// maybe bug
@@ -745,11 +752,11 @@ impl<T: Config> Pallet<T> {
 		ResourceRank::<T>::put(resource_rank);
 
 		// 删除用户拥有的资源
-		let mut user_resources = UserResources::<T>::get(who.clone()).unwrap();
+		let mut user_resources = UserResources::<T>::get(resource.clone().account_id).unwrap();
 		if let Ok(size) = user_resources.binary_search(&resource_index) {
 			user_resources.remove(size);
 		}
-		UserResources::<T>::insert(who.clone(), user_resources);
+		UserResources::<T>::insert(resource.account_id, user_resources);
 
 		// 删除资源信息
 		Resources::<T>::remove(resource_index);
@@ -835,6 +842,9 @@ impl<T: Config> Pallet<T> {
 			return;
 		}
 
-
+		for dapp_index in dapps {
+			let dapp = DApps::<T>::get(dapp_index).unwrap();
+			Self::clear_downline_dapp_information(dapp.account, dapp_index);
+		}
 	}
 }
