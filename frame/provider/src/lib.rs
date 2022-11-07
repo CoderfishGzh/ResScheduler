@@ -168,6 +168,10 @@ pub mod pallet {
 		/// 结束dapp成功
 		/// [accoutId, dapp_name, dapp_index]
 		EndDAppSuccess(T::AccountId, Vec<u8>, u64),
+
+		/// 结束dapp服务
+		/// [资源peer_id, dapp_index]
+		StopDApp(Vec<u8>, u64),
 	}
 
 	#[pallet::hooks]
@@ -185,7 +189,6 @@ pub mod pallet {
 			// 将下线资源的包含的DApp进行资源节点转移(留给offchainworker)
 
 			// 处理资源信息(留给offchainworker)
-
 
 			T::DbWeight::get().reads_writes(1, 1)
 		}
@@ -366,6 +369,7 @@ pub mod pallet {
 			let resource_peer_id = Resources::<T>::get(resource_index).unwrap().peer_id;
 
 			// 更新用户的 实例DApp 列表
+			// 将新的dapp名字更新到 实例列表里面
 			let mut user_dapps = UserDApps::<T>::get(who.clone()).unwrap_or_else(|| Vec::new());
 			if let Err(size) = user_dapps.binary_search(&dapp_name) {
 				user_dapps.insert(size, dapp_name);
@@ -444,12 +448,83 @@ pub mod pallet {
 			Ok(())
 		}
 
+		/// 修改dapp的规格
+		/// 停掉旧的dapp，使用新的部署信息，重新部署dapp
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
 		pub fn change_dapp_specification(
 			account_id: OriginFor<T>,
-			_peer_id: Vec<u8>,
+			method: DeploymentMethod,
+			dapp_name: Vec<u8>,
+			cpu: u8,
+			memory: u8,
+			replicas: u8,
+			acliable: u8,
 		) -> DispatchResult {
-			let _who = ensure_signed(account_id)?;
+			let who = ensure_signed(account_id)?;
+
+			//  判断该dapp是否被用户部署过
+			if !UserDApps::<T>::contains_key(who.clone()) {
+				return Err(Error::<T>::NotHaveDApp.into())
+			}
+
+			let user_dapps = UserDApps::<T>::get(who.clone()).unwrap();
+			ensure!(user_dapps.contains(dapp_name.as_ref()), Error::<T>::NotHaveDApp,);
+
+			// 拿到 dapp 的部署信息
+			let old_dapp_index = DAppnameToIndex::<T>::get(dapp_name.clone()).unwrap();
+			let dapp = DApps::<T>::get(old_dapp_index).unwrap();
+			let old_deployment_index = dapp.method_index;
+
+			// 删除部署信息
+			Deployments::<T>::remove(old_deployment_index);
+
+			// 删除dapp信息
+			DApps::<T>::remove(old_dapp_index);
+
+			// 从资源里删除对应的dapp index
+			let mut resource = Resources::<T>::get(dapp.resource_index).unwrap();
+			let resource_dapps: Vec<u64> =
+				resource.dapps.into_iter().filter(|&dapp| dapp != old_dapp_index).collect();
+			resource.dapps = resource_dapps;
+			Resources::<T>::insert(dapp.resource_index, resource.clone());
+
+			// 发送停止旧dapp服务的event
+			Self::deposit_event(Event::<T>::StopDApp(resource.peer_id, old_dapp_index));
+
+			// 生成新的部署信息
+			let new_deployment =
+				DeploymentInfo::new(who.clone(), method.clone(), cpu, memory, replicas, acliable);
+
+			// 记录新的部署信息
+			let deployment_index = DeploymentIndex::<T>::get();
+			Deployments::<T>::insert(deployment_index, new_deployment);
+			DeploymentIndex::<T>::put(deployment_index.saturating_add(1));
+
+			// 实例化dapp
+			let (resource_index, dapp_index) =
+				match Self::instantiate(dapp_name.clone(), deployment_index, cpu, memory) {
+					Some(info) => info,
+					None => return Err(Error::<T>::InstantiateError.into()),
+				};
+			// 拿到 resource 的 peer_id
+			let resource_peer_id = Resources::<T>::get(resource_index).unwrap().peer_id;
+
+			// 判断部署方法
+			let (m, command) = match &method {
+				DeploymentMethod::Cli(c) => (1, c.clone()),
+				DeploymentMethod::Ipfs(i) => (2, i.clone()),
+			};
+
+			// 资源(peer_id, cpu, memory, type, command, dapp_index)
+			Self::deposit_event(Event::<T>::DeploymentDApp(
+				resource_peer_id,
+				cpu,
+				memory,
+				m,
+				command,
+				dapp_index,
+			));
+
 			Ok(())
 		}
 
