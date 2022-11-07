@@ -181,6 +181,16 @@ pub mod pallet {
 			let resource: Vec<(u64, ComputingResource<T::AccountId, T::BlockNumber>)> =
 				Resources::<T>::iter().collect();
 
+			// 检查获取心跳超时的dapp
+			// 目前的做法是，将心跳超时的 dapp 直接停掉
+			let dapps: Vec<(u64, DAppInfo<T::BlockNumber>)> = DApps::<T>::iter().collect();
+			let failed_dapp_indexs = match Self::check_and_get_heartbeat_timeout(now, dapps) {
+				Some(i) => i,
+				None => Vec::new(),
+			};
+			// 处理心跳超时的 dapp
+			Self::deal_timeout_dapps(failed_dapp_indexs);
+
 			let failed_resource_index = match Self::check_heartbeat_timeout(now, resource) {
 				Some(i) => i,
 				None => return T::DbWeight::get().reads_writes(1, 1),
@@ -403,6 +413,7 @@ pub mod pallet {
 			Ok(())
 		}
 
+		/// 结束/下线 dapp
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
 		pub fn end_dapp_deployment(account_id: OriginFor<T>, dapp_index: u64) -> DispatchResult {
 			let who = ensure_signed(account_id)?;
@@ -422,30 +433,8 @@ pub mod pallet {
 
 			ensure!(user_dapps.contains(dapp_name.as_ref()), Error::<T>::NotHaveDApp,);
 
-			// 从用户拥有的DApp数组删除
-			user_dapps = user_dapps
-				.into_iter()
-				.filter(|dapp| dapp != &dapp_name)
-				.collect::<Vec<Vec<u8>>>();
-
-			UserDApps::<T>::insert(who.clone(), user_dapps);
-
-			// 将 DApp 信息删除
-			DApps::<T>::remove(dapp_index);
-
-			// 将 DApp name 和 index 映射 删除
-			DAppnameToIndex::<T>::remove(dapp_name.clone());
-
-			// 从资源的包含的DApp删除
-			let resource_index = dapp.resource_index;
-			let mut resource = Resources::<T>::get(resource_index).unwrap();
-			let resource_dapps = resource
-				.dapps
-				.into_iter()
-				.filter(|index| index != &resource_index)
-				.collect::<Vec<u64>>();
-			resource.dapps = resource_dapps;
-			Resources::<T>::insert(resource_index, resource);
+			// 删除dapp相关的信息
+			Self::clear_downline_dapp_information(who.clone(), dapp_index);
 
 			Self::deposit_event(Event::<T>::EndDAppSuccess(
 				who.clone(),
@@ -780,4 +769,64 @@ impl<T: Config> Pallet<T> {
 			DApps::<T>::insert(dapp_index, dapp);
 		}
 	}
+
+	fn check_and_get_heartbeat_timeout(
+		now: T::BlockNumber,
+		dapps: Vec<(u64, DAppInfo<T::BlockNumber>)>,
+	) -> Option<Vec<u64>> {
+		let mut ret: Vec<u64> = Vec::new();
+
+		for (dapp_index, dapp) in dapps {
+			let last_heartbeat = dapp.last_heartbeat;
+			let interval = now - last_heartbeat;
+			// 超时
+			if interval > HEARTBEAT_INTERVAL.into() {
+				// 统计资源index
+				ret.push(dapp_index);
+			}
+		}
+
+		if ret.is_empty() {
+			return None
+		}
+
+		Some(ret)
+	}
+
+	/// 删除dapp相关的信息
+	fn clear_downline_dapp_information(who: T::AccountId, dapp_index: u64) {
+		// 获取dapp
+		let dapp = DApps::<T>::get(dapp_index).unwrap();
+
+		// 获取用户拥有的DApps
+		let mut user_dapps = UserDApps::<T>::get(who.clone()).unwrap();
+
+		// 从用户拥有的DApps删除该dapp
+		user_dapps = user_dapps
+			.into_iter()
+			.filter(|d| d != &dapp.dapp_name)
+			.collect::<Vec<Vec<u8>>>();
+
+		UserDApps::<T>::insert(who.clone(), user_dapps);
+
+		// 将 DApp 信息删除
+		DApps::<T>::remove(dapp_index);
+
+		// 将 DApp name 和 index 映射 删除
+		DAppnameToIndex::<T>::remove(dapp.dapp_name.clone());
+
+		// 从资源的包含的DApp删除
+		let resource_index = dapp.resource_index;
+		let mut resource = Resources::<T>::get(resource_index).unwrap();
+		let resource_dapps = resource
+			.dapps
+			.into_iter()
+			.filter(|index| index != &resource_index)
+			.collect::<Vec<u64>>();
+		resource.dapps = resource_dapps;
+		Resources::<T>::insert(resource_index, resource);
+	}
+
+	/// 处理心跳超时的dapp
+	fn deal_timeout_dapps(dapps: Vec<u64>) {}
 }
