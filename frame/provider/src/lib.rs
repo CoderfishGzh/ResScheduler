@@ -30,6 +30,7 @@ pub mod pallet {
 		p_deployment::{DeploymentInfo, DeploymentMethod},
 		p_provider::{ComputingResource, ResourceConfig, ResourceStatus},
 	};
+	use sp_runtime::traits::Saturating;
 
 	/// Configure the pallet by specifying the parameters and types on which it depends.
 	#[pallet::config]
@@ -187,7 +188,8 @@ pub mod pallet {
 
 			// 检查获取心跳超时的dapp
 			// 目前的做法是，将心跳超时的 dapp 直接停掉
-			let dapps: Vec<(u64, DAppInfo<T::AccountId, T::BlockNumber>)> = DApps::<T>::iter().collect();
+			let dapps: Vec<(u64, DAppInfo<T::AccountId, T::BlockNumber>)> =
+				DApps::<T>::iter().collect();
 			let failed_dapp_indexs = match Self::check_and_get_heartbeat_timeout(now, dapps) {
 				Some(i) => i,
 				None => Vec::new(),
@@ -308,6 +310,7 @@ pub mod pallet {
 			ensure!(Resources::<T>::contains_key(resource_index), Error::<T>::InvaildResourceIndex,);
 
 			let resource = Resources::<T>::get(resource_index).unwrap();
+			let resource_dapps = resource.dapps.clone();
 
 			// 判断资源是否属于who
 			ensure!(resource.account_id == who.clone(), Error::<T>::ResourceNotOwnedByAccount,);
@@ -318,13 +321,13 @@ pub mod pallet {
 			}
 
 			// 处理资源包含的服务, 将服务重载至其他资源节点
-			match Self::re_deal_dapps(resource.dapps.clone()) {
+			match Self::re_deal_dapps(resource.dapps) {
 				None => {},
 				Some(failed) => Self::deposit_event(Event::<T>::DAppRedistribution(failed)),
 			}
 
 			// [resource_index, 重新部署的dapp index]
-			Self::deposit_event(Event::DownLineResource(resource_index, resource.dapps));
+			Self::deposit_event(Event::DownLineResource(resource_index, resource_dapps));
 			Ok(())
 		}
 
@@ -391,11 +394,16 @@ pub mod pallet {
 			DeploymentIndex::<T>::put(deployment_index.saturating_add(1));
 
 			// 实例化 Dapp
-			let (resource_index, dapp_index) =
-				match Self::instantiate(who.clone(), dapp_name.clone(), deployment_index, cpu, memory) {
-					Some(info) => info,
-					None => return Err(Error::<T>::InstantiateError.into()),
-				};
+			let (resource_index, dapp_index) = match Self::instantiate(
+				who.clone(),
+				dapp_name.clone(),
+				deployment_index,
+				cpu,
+				memory,
+			) {
+				Some(info) => info,
+				None => return Err(Error::<T>::InstantiateError.into()),
+			};
 			// 拿到 resource 的 peer_id
 			let resource_peer_id = Resources::<T>::get(resource_index).unwrap().peer_id;
 
@@ -511,11 +519,16 @@ pub mod pallet {
 			DeploymentIndex::<T>::put(deployment_index.saturating_add(1));
 
 			// 实例化dapp
-			let (resource_index, dapp_index) =
-				match Self::instantiate(who.clone(), dapp_name.clone(), deployment_index, cpu, memory) {
-					Some(info) => info,
-					None => return Err(Error::<T>::InstantiateError.into()),
-				};
+			let (resource_index, dapp_index) = match Self::instantiate(
+				who.clone(),
+				dapp_name.clone(),
+				deployment_index,
+				cpu,
+				memory,
+			) {
+				Some(info) => info,
+				None => return Err(Error::<T>::InstantiateError.into()),
+			};
 			// 拿到 resource 的 peer_id
 			let resource_peer_id = Resources::<T>::get(resource_index).unwrap().peer_id;
 
@@ -594,6 +607,7 @@ impl<T: Config> Pallet<T> {
 
 		// 创建 dapp
 		let dapp = DAppInfo::new(
+			dapp_index,
 			account,
 			dapp_name.clone(),
 			deployment_index,
@@ -607,6 +621,13 @@ impl<T: Config> Pallet<T> {
 
 		// 记录\更新 dapp 名字 对应的 index
 		DAppnameToIndex::<T>::insert(dapp_name, dapp_index);
+
+		// 将 DAppindex 记录到 资源里面
+		let mut resource = Resources::<T>::get(resource_index).unwrap();
+		if let Err(size) = resource.dapps.binary_search(&dapp_index) {
+			resource.dapps.insert(size, dapp_index);
+		}
+		Resources::<T>::insert(resource_index, resource);
 
 		Some((resource_index, dapp_index))
 	}
@@ -627,15 +648,22 @@ impl<T: Config> Pallet<T> {
 
 			let method = Deployments::<T>::get(method_index).unwrap();
 
-			let (resource_index, dapp_index) =
-				match Self::instantiate(dapp.account, dapp_name.clone(), method_index, method.cpu, method.memory)
-				{
-					Some(info) => info,
-					None => {
-						failed_dapps.push(dapp_name.clone());
-						continue
-					},
-				};
+			// 删除旧的dapp信息
+			Self::clear_downline_dapp_information(dapp.account.clone(), dapp_index);
+
+			let (resource_index, dapp_index) = match Self::instantiate(
+				dapp.account,
+				dapp_name.clone(),
+				method_index,
+				method.cpu,
+				method.memory,
+			) {
+				Some(info) => info,
+				None => {
+					failed_dapps.push(dapp_name.clone());
+					continue
+				},
+			};
 
 			// 获取资源peer_id
 			let resource_peer_id = Resources::<T>::get(resource_index).unwrap().peer_id;
@@ -691,8 +719,6 @@ impl<T: Config> Pallet<T> {
 				break
 			}
 		}
-
-		log::info!("enable {:?}", enable);
 
 		// 没有找到符合的节点
 		if !enable {
@@ -833,20 +859,26 @@ impl<T: Config> Pallet<T> {
 
 		// 从资源的包含的DApp删除
 		let resource_index = dapp.resource_index;
-		let mut resource = Resources::<T>::get(resource_index).unwrap();
-		let resource_dapps = resource
-			.dapps
-			.into_iter()
-			.filter(|index| index != &resource_index)
-			.collect::<Vec<u64>>();
-		resource.dapps = resource_dapps;
-		Resources::<T>::insert(resource_index, resource);
+		// 如果资源下线，不用删除
+		// 资源还在线上，删除
+		match Resources::<T>::get(resource_index) {
+			None => {},
+			Some(mut r) => {
+				let resource_dapps = r
+					.dapps
+					.into_iter()
+					.filter(|index| index != &resource_index)
+					.collect::<Vec<u64>>();
+				r.dapps = resource_dapps;
+				Resources::<T>::insert(resource_index, r);
+			},
+		}
 	}
 
 	/// 处理心跳超时的dapp
 	fn deal_timeout_dapps(dapps: Vec<u64>) {
 		if dapps.is_empty() {
-			return;
+			return
 		}
 
 		for dapp_index in dapps {
