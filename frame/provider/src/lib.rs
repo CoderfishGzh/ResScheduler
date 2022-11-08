@@ -172,6 +172,10 @@ pub mod pallet {
 		/// 结束dapp服务
 		/// [资源peer_id, dapp_index]
 		StopDApp(Vec<u8>, u64),
+
+		/// 资源下线
+		///	[资源index， 资源包含的DApp index]
+		DownLineResource(u64, Vec<u64>),
 	}
 
 	#[pallet::hooks]
@@ -308,16 +312,19 @@ pub mod pallet {
 			// 判断资源是否属于who
 			ensure!(resource.account_id == who.clone(), Error::<T>::ResourceNotOwnedByAccount,);
 
-			// 处理资源包含的服务, 将服务重载至其他资源节点
-			match Self::re_deal_dapps(resource.dapps) {
-				None => {},
-				Some(failed) => Self::deposit_event(Event::<T>::DAppRedistribution(failed)),
-			}
-
+			// 删除资源的相关信息
 			if !Self::clear_downline_resource_information(resource_index) {
 				return Err(Error::<T>::ClearDownlineResourceInformation.into())
 			}
 
+			// 处理资源包含的服务, 将服务重载至其他资源节点
+			match Self::re_deal_dapps(resource.dapps.clone()) {
+				None => {},
+				Some(failed) => Self::deposit_event(Event::<T>::DAppRedistribution(failed)),
+			}
+
+			// [resource_index, 重新部署的dapp index]
+			Self::deposit_event(Event::DownLineResource(resource_index, resource.dapps));
 			Ok(())
 		}
 
