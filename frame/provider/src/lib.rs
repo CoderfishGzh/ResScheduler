@@ -12,16 +12,16 @@ pub use pallet::*;
 use sp_hamster::{
 	p_dapp::{DAppInfo, DappStatus},
 	p_deployment::DeploymentMethod,
-	p_provider::ComputingResource,
+	p_provider::{ComputingResource, ResourceConfig, ResourceStatus},
 };
 
 type BalanceOf<T> =
 	<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
 /// 资源超过300个区块算超时
-const RESOURCE_HEARTBEAT_INTERVAL: u32 = 300u32;
+const RESOURCE_HEARTBEAT_INTERVAL: u32 = 40u32;
 /// DApp超过30个区块算超时
-const DAPP_HEARTBEAT_INTERVAL: u32 = 30u32;
+const DAPP_HEARTBEAT_INTERVAL: u32 = 20u32;
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -355,6 +355,7 @@ pub mod pallet {
 
 			// 更新资源心跳时间
 			resource.last_heartbeat = block_number;
+			Resources::<T>::insert(resource_index, resource.clone());
 
 			// 更新dapp心跳时间
 			Self::update_dapp_heartbeat_time(dapps.clone());
@@ -704,7 +705,14 @@ impl<T: Config> Pallet<T> {
 		let mut resource_node_index = 0;
 		let mut enable = false;
 
-		let mut ret = Resources::<T>::get(resource_rank[0].1).unwrap();
+		if resource_rank.is_empty() {
+			return None
+		}
+
+		let mut ret = match Resources::<T>::get(resource_rank[0].1) {
+			Some(res) => res,
+			None => return None,
+		};
 
 		for (i, (_, node_index)) in resource_rank.iter().enumerate() {
 			// 寻找满足要求的节点
@@ -796,6 +804,8 @@ impl<T: Config> Pallet<T> {
 		// 删除资源信息
 		Resources::<T>::remove(resource_index);
 
+		// 通知资源下线
+		Self::deposit_event(Event::DownLineResource(resource_index, resource.dapps));
 		true
 	}
 
