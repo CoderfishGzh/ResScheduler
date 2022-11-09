@@ -1407,11 +1407,25 @@ impl pallet_state_trie_migration::Config for Runtime {
 	type WeightInfo = ();
 }
 
+// impl frame_system::offchain::SigningTypes for Runtime {
+// 	type Public = <Signature as sp_runtime::traits::Verify>::Signer;
+// 	type Signature = Signature;
+// }
+//
+// impl<C> frame_system::offchain::SendTransactionTypes<C> for Runtime
+// 	where
+// 		Call: From<C>,
+// {
+// 	type Extrinsic = UncheckedExtrinsic;
+// 	type OverarchingCall = Call;
+// }
+
 impl pallet_provider::Config for Runtime {
 	type Event = Event;
 	type Currency = Balances;
 	type BalanceToNumber = ConvertInto;
 	type NumberToBalance = ConvertInto;
+	type AuthorityId = pallet_provider::crypto::OcwAuthId;
 }
 
 construct_runtime!(

@@ -23,6 +23,43 @@ const RESOURCE_HEARTBEAT_INTERVAL: u32 = 40u32;
 /// DApp超过30个区块算超时
 const DAPP_HEARTBEAT_INTERVAL: u32 = 20u32;
 
+use frame_system::{
+	offchain::{
+		AppCrypto, CreateSignedTransaction, SendSignedTransaction,
+		Signer,
+	},
+};
+use sp_core::crypto::KeyTypeId;
+
+pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"ocwd");
+pub mod crypto {
+	use super::KEY_TYPE;
+	use sp_core::sr25519::Signature as Sr25519Signature;
+	use sp_runtime::{
+		app_crypto::{app_crypto, sr25519},
+		traits::Verify,
+		MultiSignature, MultiSigner,
+	};
+	app_crypto!(sr25519, KEY_TYPE);
+
+	pub struct OcwAuthId;
+
+	impl frame_system::offchain::AppCrypto<MultiSigner, MultiSignature> for OcwAuthId {
+		type RuntimeAppPublic = Public;
+		type GenericSignature = sp_core::sr25519::Signature;
+		type GenericPublic = sp_core::sr25519::Public;
+	}
+
+	impl frame_system::offchain::AppCrypto<<Sr25519Signature as Verify>::Signer, Sr25519Signature>
+	for OcwAuthId
+	{
+		type RuntimeAppPublic = Public;
+		type GenericSignature = sp_core::sr25519::Signature;
+		type GenericPublic = sp_core::sr25519::Public;
+	}
+}
+
+
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
@@ -34,7 +71,7 @@ pub mod pallet {
 
 	/// Configure the pallet by specifying the parameters and types on which it depends.
 	#[pallet::config]
-	pub trait Config: frame_system::Config {
+	pub trait Config: frame_system::Config + CreateSignedTransaction<Call<Self>> {
 		/// Because this pallet emits events, it depends on the runtime's definition of an event.
 		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
 
@@ -45,6 +82,8 @@ pub mod pallet {
 		type BalanceToNumber: Convert<BalanceOf<Self>, u128>;
 
 		type NumberToBalance: Convert<u128, BalanceOf<Self>>;
+
+		type AuthorityId: AppCrypto<Self::Public, Self::Signature>;
 	}
 
 	#[pallet::pallet]
