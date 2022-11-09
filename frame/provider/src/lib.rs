@@ -18,9 +18,10 @@ use sp_hamster::{
 type BalanceOf<T> =
 	<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
-/// 心跳间隔300个区块，即30分钟
-/// 超过30分钟，判定为超时
-const HEARTBEAT_INTERVAL: u32 = 300u32;
+/// 资源超过300个区块算超时
+const RESOURCE_HEARTBEAT_INTERVAL: u32 = 300u32;
+/// DApp超过30个区块算超时
+const DAPP_HEARTBEAT_INTERVAL: u32 = 30u32;
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -30,7 +31,6 @@ pub mod pallet {
 		p_deployment::{DeploymentInfo, DeploymentMethod},
 		p_provider::{ComputingResource, ResourceConfig, ResourceStatus},
 	};
-	use sp_runtime::traits::Saturating;
 
 	/// Configure the pallet by specifying the parameters and types on which it depends.
 	#[pallet::config]
@@ -164,7 +164,7 @@ pub mod pallet {
 
 		/// 部署失败
 		/// [部署失败的DApp name]
-		DAppRedistribution(Vec<Vec<u8>>),
+		DAppRedistributionFailed(Vec<Vec<u8>>),
 
 		/// 结束dapp成功
 		/// [accoutId, dapp_name, dapp_index]
@@ -185,31 +185,33 @@ pub mod pallet {
 			// 获取资源列表
 			let resource: Vec<(u64, ComputingResource<T::AccountId, T::BlockNumber>)> =
 				Resources::<T>::iter().collect();
-
-			// 检查获取心跳超时的dapp
-			// 目前的做法是，将心跳超时的 dapp 直接停掉
-			let dapps: Vec<(u64, DAppInfo<T::AccountId, T::BlockNumber>)> =
-				DApps::<T>::iter().collect();
-			let failed_dapp_indexs = match Self::check_and_get_heartbeat_timeout(now, dapps) {
-				Some(i) => i,
+			// 检查资源过期情况
+			let offline_resources = match Self::check_resource_heartbeat_timeout(now, resource) {
+				Some(tmp) => tmp,
 				None => Vec::new(),
 			};
-			// 处理心跳超时的 dapp
-			Self::deal_timeout_dapps(failed_dapp_indexs);
-
-			let failed_resource_indexs = match Self::check_heartbeat_timeout(now, resource) {
-				Some(i) => i,
-				None => return T::DbWeight::get().reads_writes(1, 1),
-			};
-
-			// 将下线资源的包含的DApp进行资源节点转移(留给offchainworker)
-			if let Some(dapps_name) = Self::re_deal_dapps(failed_resource_indexs.clone()) {
-				Self::deposit_event(Event::<T>::DAppRedistribution(dapps_name));
+			// 获取过期资源包含的DApp index
+			let dapps_need_processed =
+				Self::offline_resources_to_dapp_indexs(offline_resources.clone());
+			// 下线资源,处理资源信息
+			for offline_resource in offline_resources {
+				Self::clear_downline_resource_information(offline_resource);
 			}
 
-			// 处理资源信息(留给offchainworker)
-			for failed_resource_index in failed_resource_indexs {
-				Self::clear_downline_resource_information(failed_resource_index);
+			// 获取dapp列表
+			let dapps: Vec<(u64, DAppInfo<T::AccountId, T::BlockNumber>)> =
+				DApps::<T>::iter().collect();
+			// 检查dapps 超时情况
+			let offline_dapps = match Self::check_dapp_heartbeat_timeout(now, dapps) {
+				Some(tmp) => tmp,
+				None => Vec::new(),
+			};
+			// 合并需要处理的dapps
+			let dapp_need_processed =
+				Self::merge_dapps_need_processed(dapps_need_processed, offline_dapps);
+			// 处理需要转移的dapps
+			if let Some(f) = Self::re_deal_dapps(dapp_need_processed) {
+				Self::deposit_event(Event::<T>::DAppRedistributionFailed(f));
 			}
 
 			T::DbWeight::get().reads_writes(1, 1)
@@ -323,7 +325,7 @@ pub mod pallet {
 			// 处理资源包含的服务, 将服务重载至其他资源节点
 			match Self::re_deal_dapps(resource.dapps) {
 				None => {},
-				Some(failed) => Self::deposit_event(Event::<T>::DAppRedistribution(failed)),
+				Some(failed) => Self::deposit_event(Event::<T>::DAppRedistributionFailed(failed)),
 			}
 
 			// [resource_index, 重新部署的dapp index]
@@ -745,7 +747,7 @@ impl<T: Config> Pallet<T> {
 
 	// 检查超时心跳的资源
 	// 返回超时的资源节点
-	fn check_heartbeat_timeout(
+	fn check_resource_heartbeat_timeout(
 		now: T::BlockNumber,
 		resources: Vec<(u64, ComputingResource<T::AccountId, T::BlockNumber>)>,
 	) -> Option<Vec<u64>> {
@@ -754,7 +756,7 @@ impl<T: Config> Pallet<T> {
 			let last_heartbeat = resource.last_heartbeat;
 			let interval = now - last_heartbeat;
 			// 超时
-			if interval > HEARTBEAT_INTERVAL.into() {
+			if interval > RESOURCE_HEARTBEAT_INTERVAL.into() {
 				// 统计资源index
 				ret.push(resouece_idnex);
 			}
@@ -812,7 +814,7 @@ impl<T: Config> Pallet<T> {
 		}
 	}
 
-	fn check_and_get_heartbeat_timeout(
+	fn check_dapp_heartbeat_timeout(
 		now: T::BlockNumber,
 		dapps: Vec<(u64, DAppInfo<T::AccountId, T::BlockNumber>)>,
 	) -> Option<Vec<u64>> {
@@ -822,7 +824,7 @@ impl<T: Config> Pallet<T> {
 			let last_heartbeat = dapp.last_heartbeat;
 			let interval = now - last_heartbeat;
 			// 超时
-			if interval > HEARTBEAT_INTERVAL.into() {
+			if interval > DAPP_HEARTBEAT_INTERVAL.into() {
 				// 统计资源index
 				ret.push(dapp_index);
 			}
@@ -864,13 +866,15 @@ impl<T: Config> Pallet<T> {
 		match Resources::<T>::get(resource_index) {
 			None => {},
 			Some(mut r) => {
-				let resource_dapps = r
-					.dapps
-					.into_iter()
-					.filter(|index| index != &resource_index)
-					.collect::<Vec<u64>>();
+				let resource_dapps =
+					r.dapps.into_iter().filter(|index| index != &dapp_index).collect::<Vec<u64>>();
 				r.dapps = resource_dapps;
-				Resources::<T>::insert(resource_index, r);
+				// 释放资源
+				let method = Deployments::<T>::get(dapp.method_index).unwrap();
+				r.config.release_resource(method.cpu, method.memory);
+				Resources::<T>::insert(resource_index, r.clone());
+				// 让 provider 停掉该 dapp
+				Self::deposit_event(Event::<T>::StopDApp(r.peer_id, dapp_index));
 			},
 		}
 	}
@@ -885,5 +889,31 @@ impl<T: Config> Pallet<T> {
 			let dapp = DApps::<T>::get(dapp_index).unwrap();
 			Self::clear_downline_dapp_information(dapp.account, dapp_index);
 		}
+	}
+
+	/// 获取过期资源包含的dapp index
+	fn offline_resources_to_dapp_indexs(offline_resources: Vec<u64>) -> Vec<u64> {
+		let mut ret: Vec<u64> = Vec::new();
+		for offline_resource in offline_resources {
+			let mut resource = Resources::<T>::get(offline_resource).unwrap();
+			ret.append(&mut resource.dapps);
+		}
+
+		ret
+	}
+
+	/// 合并需要处理的dapps
+	fn merge_dapps_need_processed(dapps_one: Vec<u64>, mut dapps_two: Vec<u64>) -> Vec<u64> {
+		if dapps_one.is_empty() && dapps_two.is_empty() {
+			return Vec::new()
+		}
+
+		for dapp in dapps_one {
+			if let Err(pos) = dapps_two.binary_search(&dapp) {
+				dapps_two.insert(pos, dapp);
+			}
+		}
+
+		dapps_two
 	}
 }

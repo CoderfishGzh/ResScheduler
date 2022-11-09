@@ -122,7 +122,7 @@ impl ResourceConfig {
 	}
 
 	// 释放资源
-	fn release_resource(&mut self, cpu: u8, memory: u8) -> bool {
+	pub fn release_resource(&mut self, cpu: u8, memory: u8) -> bool {
 		let used_cpu = self.total_cpu.saturating_sub(self.unused_cpu);
 		let used_memory = self.total_memory.saturating_sub(self.unused_memory);
 
