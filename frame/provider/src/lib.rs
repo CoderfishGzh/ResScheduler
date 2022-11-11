@@ -23,12 +23,7 @@ const RESOURCE_HEARTBEAT_INTERVAL: u32 = 40u32;
 /// DApp超过30个区块算超时
 const DAPP_HEARTBEAT_INTERVAL: u32 = 20u32;
 
-use frame_system::{
-	offchain::{
-		AppCrypto, CreateSignedTransaction, SendSignedTransaction,
-		Signer,
-	},
-};
+use frame_system::offchain::{AppCrypto, CreateSignedTransaction, SendSignedTransaction, Signer};
 use sp_core::crypto::KeyTypeId;
 
 pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"ocwd");
@@ -51,7 +46,7 @@ pub mod crypto {
 	}
 
 	impl frame_system::offchain::AppCrypto<<Sr25519Signature as Verify>::Signer, Sr25519Signature>
-	for OcwAuthId
+		for OcwAuthId
 	{
 		type RuntimeAppPublic = Public;
 		type GenericSignature = sp_core::sr25519::Signature;
@@ -59,10 +54,10 @@ pub mod crypto {
 	}
 }
 
-
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
+	use frame_support::storage::bounded_btree_map::BoundedBTreeMap;
 	use sp_hamster::{
 		p_dapp::DAppInfo,
 		p_deployment::{DeploymentInfo, DeploymentMethod},
@@ -155,6 +150,11 @@ pub mod pallet {
 	#[pallet::getter(fn dappname_to_index)]
 	pub(super) type DAppnameToIndex<T: Config> =
 		StorageMap<_, Twox64Concat, Vec<u8>, u64, OptionQuery>;
+
+	#[pallet::storage]
+	#[pallet::getter(fn test)]
+	pub(super) type Test<T: Config> =
+		StorageMap<_, Twox64Concat, Vec<u8>, BoundedBTreeMap<u8, u8, ConstU32<100>>, OptionQuery>;
 
 	// The genesis config type.
 	#[pallet::genesis_config]
@@ -964,5 +964,36 @@ impl<T: Config> Pallet<T> {
 		}
 
 		dapps_two
+	}
+
+	/// offchain worker 函数
+	/// 只能读链上数据，不能往链上写数据
+	/// 需要记录做过的操作
+	/// 处理需要处理的dapps
+	fn ow_deal_timeout_dapps(dapps_index: Vec<u64>) {
+		// 记录资源做过的操作 (resource_index, cpu, memory)
+		let mut resource_change_log: Vec<(u64, u8, u8)> = Vec::new();
+	}
+}
+
+pub trait Ordering {
+	type Item;
+	fn orderly_insertion(&mut self, element: Self::Item);
+	fn orderly_removal(&mut self, element: Self::Item);
+}
+
+impl<T: Clone + Ord> Ordering for Vec<T> {
+	type Item = T;
+
+	fn orderly_insertion(&mut self, element: Self::Item) {
+		if let Err(pos) = self.binary_search(&element) {
+			self.insert(pos, element);
+		}
+	}
+
+	fn orderly_removal(&mut self, element: Self::Item) {
+		if let Ok(pos) = self.binary_search(&element) {
+			self.remove(pos);
+		}
 	}
 }
