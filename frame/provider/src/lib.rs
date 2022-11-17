@@ -1,12 +1,12 @@
+#![feature(let_else)]
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
-
 use frame_support::{
 	dispatch::DispatchResult, pallet_prelude::*, sp_runtime::traits::Convert, traits::Currency,
 };
 
 use frame_system::pallet_prelude::*;
-use sp_std::{convert::TryInto, vec::Vec};
+use sp_std::{convert::TryInto, map, vec::Vec};
 
 pub use pallet::*;
 use sp_hamster::{
@@ -971,8 +971,62 @@ impl<T: Config> Pallet<T> {
 	/// 需要记录做过的操作
 	/// 处理需要处理的dapps
 	fn ow_deal_timeout_dapps(dapps_index: Vec<u64>) {
-		// 记录资源做过的操作 (resource_index, cpu, memory)
-		let mut resource_change_log: Vec<(u64, u8, u8)> = Vec::new();
+		// 资源做过的操作 (resource_index, cpu, memory)
+		let mut resource_change_log = ResourceChangeLog::new();
+		// 资源排行
+		let mut resource_rank = ResourceRank::<T>::get();
+
+		for dapp_index in dapps_index {
+			// 根据部署信息分配资源节点
+			Self::ow_get_resource_index(&mut resource_rank, &mut resource_change_log, dapp_index);
+		}
+	}
+
+	fn ow_get_resource_index(
+		resource_rank: &mut Vec<(u64, u64)>,
+		resource_change_log: &mut ResourceChangeLog,
+		dapp_index: u64,
+	) -> Option<u64> {
+		// 取出对应的dapp
+		let Some(dapp) = DApps::<T>::get(dapp_index) else {
+			return None;
+		};
+		// 取出部署信息
+		let Some(deployment) = Deployments::<T>::get(dapp.method_index) else {
+			return None;
+		};
+
+		for (_, resource_index) in resource_rank.iter() {
+			// 拿到resource
+			let mut resource = match Resources::<T>::get(resource_index) {
+				Some(tmp) => tmp,
+				None => continue,
+			};
+
+			// 剩余资源
+			let (_, mut changeed_cpu, mut changeed_mem) = match resource_change_log.get(resource_index) {
+				Some(tmp) => tmp,
+				None => (*resource_index, 0, 0),
+			};
+			let unused_cpu = resource.config.unused_cpu - changeed_cpu;
+			let unused_memory = resource.config.unused_memory - changeed_mem;
+
+			// 判断是否符合要求
+			if unused_cpu < deployment.cpu || unused_memory < deployment.memory {
+				continue
+			}
+
+			// 资源符合要求,
+			// 记录资源变动情况
+			changeed_cpu += deployment.cpu.clone();
+			changeed_mem += deployment.memory.clone();
+			resource_change_log.insert_or_change((*resource_index, changeed_cpu, changeed_mem));
+
+			// 更改resource index 对应的 rank 里面的资源
+
+		}
+
+		None
 	}
 }
 
@@ -995,5 +1049,46 @@ impl<T: Clone + Ord> Ordering for Vec<T> {
 		if let Ok(pos) = self.binary_search(&element) {
 			self.remove(pos);
 		}
+	}
+}
+
+pub struct ResourceChangeLog {
+	// (resource id, cpu, memory)
+	log: Vec<(u64, u8, u8)>,
+}
+
+impl ResourceChangeLog {
+	fn new() -> Self {
+		Self { log: Vec::new() }
+	}
+
+	fn insert_or_change(&mut self, value: (u64, u8, u8)) {
+		let mut pos = 0;
+		let mut finded = false;
+		for (index, (id, _, _)) in self.log.iter().enumerate() {
+			if *id == value.0 {
+				pos = index;
+				finded = true;
+				break
+			}
+		}
+
+		if finded {
+			*self.log.get_mut(pos).unwrap() = value;
+		} else {
+			if let Err(pos) = self.log.binary_search(&value) {
+				self.log.insert(pos, value);
+			}
+		}
+	}
+
+	fn get(&self, key: &u64) -> Option<(u64, u8, u8)> {
+		let value = self.log.iter().filter(|x| x.0 == *key).collect::<Vec<_>>();
+
+		if value.len() != 1 {
+			return None
+		}
+
+		Some(value[0].clone())
 	}
 }
