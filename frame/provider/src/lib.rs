@@ -216,6 +216,9 @@ pub mod pallet {
 		/// 资源下线
 		///	[资源index， 资源包含的DApp index]
 		DownLineResource(u64, Vec<u64>),
+
+		/// dapps 重启失败名单
+		DAppReStartFailed(Vec<u64>),
 	}
 
 	#[pallet::hooks]
@@ -497,7 +500,7 @@ pub mod pallet {
 			ensure!(user_dapps.contains(dapp_name.as_ref()), Error::<T>::NotHaveDApp,);
 
 			// 删除dapp相关的信息
-			Self::clear_downline_dapp_information(who.clone(), dapp_index);
+			Self::clear_downline_dapp_information(dapp_index);
 
 			Self::deposit_event(Event::<T>::EndDAppSuccess(
 				who.clone(),
@@ -621,6 +624,50 @@ pub mod pallet {
 			Self::deposit_event(Event::<T>::DAppHeartbeat(who, dapp_name));
 			Ok(())
 		}
+
+		/// offchain 函数
+		/// 用于上传更新 offchain 中改变的函数
+		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
+		pub fn ow_update_data(
+			account_id: OriginFor<T>,
+			success_dapps: Vec<(u64, u64)>,
+			failed_dapps: Vec<u64>,
+			resource_change_log: ResourceChangeLog,
+		) -> DispatchResult {
+			let who = ensure_signed(account_id)?;
+
+			// 发出失败的event
+			Self::deposit_event(Event::<T>::DAppReStartFailed(failed_dapps));
+
+			// 修改 dapps 信息
+			Self::change_dapp_info(&success_dapps);
+
+			// 发出部署信息
+			for (dapp_index, resource_index) in success_dapps {
+				let dapp = DApps::<T>::get(dapp_index).unwrap();
+				let deployment = Deployments::<T>::get(dapp.method_index).unwrap();
+				// 判断 部署方式
+				let (m, command) = match &deployment.method {
+					DeploymentMethod::Cli(c) => (1, c.clone()),
+					DeploymentMethod::Ipfs(i) => (2, i.clone()),
+				};
+
+				let resource_peer_id = Resources::<T>::get(resource_index).unwrap().peer_id;
+				Self::deposit_event(Event::DeploymentDApp(
+					resource_peer_id,
+					deployment.cpu,
+					deployment.memory,
+					m,
+					command,
+					dapp_index,
+				));
+			}
+
+			// 更新资源信息
+			Self::update_resource_info(resource_change_log);
+
+			Ok(())
+		}
 	}
 }
 
@@ -691,7 +738,7 @@ impl<T: Config> Pallet<T> {
 			let method = Deployments::<T>::get(method_index).unwrap();
 
 			// 删除旧的dapp信息
-			Self::clear_downline_dapp_information(dapp.account.clone(), dapp_index);
+			Self::clear_downline_dapp_information(dapp_index);
 
 			let (resource_index, dapp_index) = match Self::instantiate(
 				dapp.account,
@@ -887,10 +934,11 @@ impl<T: Config> Pallet<T> {
 	}
 
 	/// 删除dapp相关的信息
-	fn clear_downline_dapp_information(who: T::AccountId, dapp_index: u64) {
+	/// 保留 部署信息
+	fn clear_downline_dapp_information(dapp_index: u64) {
 		// 获取dapp
 		let dapp = DApps::<T>::get(dapp_index).unwrap();
-
+		let who = dapp.account;
 		// 获取用户拥有的DApps
 		let mut user_dapps = UserDApps::<T>::get(who.clone()).unwrap();
 
@@ -936,7 +984,7 @@ impl<T: Config> Pallet<T> {
 
 		for dapp_index in dapps {
 			let dapp = DApps::<T>::get(dapp_index).unwrap();
-			Self::clear_downline_dapp_information(dapp.account, dapp_index);
+			Self::clear_downline_dapp_information(dapp_index);
 		}
 	}
 
@@ -1066,6 +1114,44 @@ impl<T: Config> Pallet<T> {
 
 		Some(ret)
 	}
+
+	/// 修改 dapp 的资源节点、状态、心跳时间
+	fn change_dapp_info(dapps_index: &Vec<(u64, u64)>) {
+		for (dapp_index, resource_index) in dapps_index {
+			// 取出dapp info
+			let mut dapp = DApps::<T>::get(dapp_index).unwrap();
+			// 修改 资源节点、状态
+			dapp.resource_index = *resource_index;
+			dapp.status = DappStatus::Online;
+			dapp.last_heartbeat = <frame_system::Pallet<T>>::block_number();
+			// 记录更新
+			DApps::<T>::insert(dapp_index, dapp);
+		}
+	}
+
+	/// 使用 change_log 更新 资源以及resource_rank
+	fn update_resource_info(change_log: ResourceChangeLog) {
+		let mut resource_rank = ResourceRank::<T>::get();
+		for (resource_index, cpu, mem) in change_log.log {
+			// 取出reosuece 修改已经使用的资源
+			let mut resource = Resources::<T>::get(resource_index).unwrap();
+			resource.config.use_resource(cpu, mem);
+			Resources::<T>::insert(resource_index, resource);
+
+			// 找到resource_index 对应的 pos
+			let mut pos = 0;
+			for (i, (_, ri)) in resource_rank.iter().enumerate() {
+				if ri == &resource_index {
+					pos = i;
+					break
+				}
+			}
+			// 修改
+			let mut v = resource_rank.get_mut(pos).unwrap();
+			v.0 = v.0 + cpu as u64 + mem as u64;
+		}
+		ResourceRank::<T>::put(resource_rank);
+	}
 }
 
 pub trait Ordering {
@@ -1091,7 +1177,9 @@ impl<T: Clone + Ord> Ordering for Vec<T> {
 }
 
 /// 存储资源在 offchain 里做的变化
+#[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, TypeInfo)]
 pub struct ResourceChangeLog {
+	// cpu mem 是使用过
 	// (resource id, cpu, memory)
 	log: Vec<(u64, u8, u8)>,
 }
