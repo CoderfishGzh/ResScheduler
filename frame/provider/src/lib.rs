@@ -976,12 +976,33 @@ impl<T: Config> Pallet<T> {
 		// 资源排行
 		let mut resource_rank = ResourceRank::<T>::get();
 
+		// 分配成功的dapp (dapp index, resource_index)
+		let mut success_dapps: Vec<(u64, u64)> = Vec::new();
+		// 分配失败的dapp
+		let mut failed_dapps: Vec<u64> = Vec::new();
+
 		for dapp_index in dapps_index {
 			// 根据部署信息分配资源节点
-			Self::ow_get_resource_index(&mut resource_rank, &mut resource_change_log, dapp_index);
+			match Self::ow_get_resource_index(
+				&mut resource_rank,
+				&mut resource_change_log,
+				dapp_index,
+			) {
+				Some(index) => {
+					success_dapps.push((dapp_index, index));
+				},
+				None => {
+					failed_dapps.push(dapp_index);
+				},
+			}
 		}
+
+		//  将数据签名上链
 	}
 
+	/// offchain worker 函数
+	/// 返回分配的resouece index
+	/// 如果分配不成功，返回None
 	fn ow_get_resource_index(
 		resource_rank: &mut Vec<(u64, u64)>,
 		resource_change_log: &mut ResourceChangeLog,
@@ -996,7 +1017,11 @@ impl<T: Config> Pallet<T> {
 			return None;
 		};
 
-		for (_, resource_index) in resource_rank.iter() {
+		let mut pos = 0;
+		let mut enable = false;
+		let mut ret = 0;
+		let mut cm = 0;
+		for (i, (old_cm, resource_index)) in resource_rank.iter().enumerate() {
 			// 拿到resource
 			let mut resource = match Resources::<T>::get(resource_index) {
 				Some(tmp) => tmp,
@@ -1004,10 +1029,11 @@ impl<T: Config> Pallet<T> {
 			};
 
 			// 剩余资源
-			let (_, mut changeed_cpu, mut changeed_mem) = match resource_change_log.get(resource_index) {
-				Some(tmp) => tmp,
-				None => (*resource_index, 0, 0),
-			};
+			let (_, mut changeed_cpu, mut changeed_mem) =
+				match resource_change_log.get(resource_index) {
+					Some(tmp) => tmp,
+					None => (*resource_index, 0, 0),
+				};
 			let unused_cpu = resource.config.unused_cpu - changeed_cpu;
 			let unused_memory = resource.config.unused_memory - changeed_mem;
 
@@ -1022,11 +1048,23 @@ impl<T: Config> Pallet<T> {
 			changeed_mem += deployment.memory.clone();
 			resource_change_log.insert_or_change((*resource_index, changeed_cpu, changeed_mem));
 
-			// 更改resource index 对应的 rank 里面的资源
-
+			// 记录pos && true
+			pos = i;
+			ret = *resource_index;
+			cm = old_cm - deployment.cpu as u64 - deployment.memory as u64;
+			enable = true;
 		}
 
-		None
+		if enable == false {
+			return None
+		}
+
+		// 整理 resource rank的问题
+		// 删除该节点，重新排序
+		resource_rank.remove(pos);
+		resource_rank.insert(pos, (cm, ret));
+
+		Some(ret)
 	}
 }
 
@@ -1052,6 +1090,7 @@ impl<T: Clone + Ord> Ordering for Vec<T> {
 	}
 }
 
+/// 存储资源在 offchain 里做的变化
 pub struct ResourceChangeLog {
 	// (resource id, cpu, memory)
 	log: Vec<(u64, u8, u8)>,
@@ -1062,6 +1101,8 @@ impl ResourceChangeLog {
 		Self { log: Vec::new() }
 	}
 
+	/// 插入一个 value（resource id， cpu， mem）
+	/// 如果id存在，则替换对应的value
 	fn insert_or_change(&mut self, value: (u64, u8, u8)) {
 		let mut pos = 0;
 		let mut finded = false;
@@ -1082,6 +1123,8 @@ impl ResourceChangeLog {
 		}
 	}
 
+	/// 获取resouece id 对应的 value
+	/// 不存在返回None
 	fn get(&self, key: &u64) -> Option<(u64, u8, u8)> {
 		let value = self.log.iter().filter(|x| x.0 == *key).collect::<Vec<_>>();
 
@@ -1092,3 +1135,5 @@ impl ResourceChangeLog {
 		Some(value[0].clone())
 	}
 }
+
+pub(crate) trait Rank {}
