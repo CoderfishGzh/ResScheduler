@@ -5,14 +5,15 @@ use frame_support::{
 	dispatch::DispatchResult, pallet_prelude::*, sp_runtime::traits::Convert, traits::Currency,
 };
 
+use crate::pallet::Call;
 use frame_system::pallet_prelude::*;
-use sp_std::{convert::TryInto, map, vec::Vec};
+use sp_std::{convert::TryInto, vec::Vec};
 
 pub use pallet::*;
 use sp_hamster::{
 	p_dapp::{DAppInfo, DappStatus},
 	p_deployment::DeploymentMethod,
-	p_provider::{ComputingResource, ResourceConfig, ResourceStatus},
+	p_provider::ComputingResource,
 };
 
 type BalanceOf<T> =
@@ -25,6 +26,7 @@ const DAPP_HEARTBEAT_INTERVAL: u32 = 20u32;
 
 use frame_system::offchain::{AppCrypto, CreateSignedTransaction, SendSignedTransaction, Signer};
 use sp_core::crypto::KeyTypeId;
+// use sp_runtime::transaction_validity::InvalidTransaction::Call;
 
 pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"ocwd");
 pub mod crypto {
@@ -41,23 +43,22 @@ pub mod crypto {
 
 	impl frame_system::offchain::AppCrypto<MultiSigner, MultiSignature> for OcwAuthId {
 		type RuntimeAppPublic = Public;
-		type GenericSignature = sp_core::sr25519::Signature;
 		type GenericPublic = sp_core::sr25519::Public;
+		type GenericSignature = sp_core::sr25519::Signature;
 	}
 
 	impl frame_system::offchain::AppCrypto<<Sr25519Signature as Verify>::Signer, Sr25519Signature>
 		for OcwAuthId
 	{
 		type RuntimeAppPublic = Public;
-		type GenericSignature = sp_core::sr25519::Signature;
 		type GenericPublic = sp_core::sr25519::Public;
+		type GenericSignature = sp_core::sr25519::Signature;
 	}
 }
 
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
-	use frame_support::storage::bounded_btree_map::BoundedBTreeMap;
 	use sp_hamster::{
 		p_dapp::DAppInfo,
 		p_deployment::{DeploymentInfo, DeploymentMethod},
@@ -151,10 +152,10 @@ pub mod pallet {
 	pub(super) type DAppnameToIndex<T: Config> =
 		StorageMap<_, Twox64Concat, Vec<u8>, u64, OptionQuery>;
 
+	/// 需要处理的dapps 列表
 	#[pallet::storage]
-	#[pallet::getter(fn test)]
-	pub(super) type Test<T: Config> =
-		StorageMap<_, Twox64Concat, Vec<u8>, BoundedBTreeMap<u8, u8, ConstU32<100>>, OptionQuery>;
+	#[pallet::getter(fn dapp_need_to_deal)]
+	pub(super) type DAppsNeedToDeal<T: Config> = StorageValue<_, Vec<u64>, ValueQuery>;
 
 	// The genesis config type.
 	#[pallet::genesis_config]
@@ -249,14 +250,46 @@ pub mod pallet {
 				None => Vec::new(),
 			};
 			// 合并需要处理的dapps
-			let dapp_need_processed =
+			let new_dapps_need_deal =
 				Self::merge_dapps_need_processed(dapps_need_processed, offline_dapps);
-			// 处理需要转移的dapps
-			if let Some(f) = Self::re_deal_dapps(dapp_need_processed) {
-				Self::deposit_event(Event::<T>::DAppRedistributionFailed(f));
-			}
+			// // 处理需要转移的dapps
+			// if let Some(f) = Self::re_deal_dapps(dapp_need_processed) {
+			// 	Self::deposit_event(Event::<T>::DAppRedistributionFailed(f));
+			// }
+
+			// 记录需要处理的dapps
+			let old_need_to_deal = DAppsNeedToDeal::<T>::get();
+			let new_dapps_need_deal =
+				Self::merge_dapps_need_processed(new_dapps_need_deal, old_need_to_deal);
+			DAppsNeedToDeal::<T>::put(new_dapps_need_deal);
 
 			T::DbWeight::get().reads_writes(1, 1)
+		}
+
+		/// 链下工作机函数
+		/// 在有需要进行dapp重新分配时执行
+		fn offchain_worker(block_number: T::BlockNumber) {
+			let dapps_need_deal = DAppsNeedToDeal::<T>::get();
+			if dapps_need_deal.is_empty() {
+				log::info!("-------------------------------------------------");
+				log::info!("No dapps to process");
+				log::info!("-------------------------------------------------");
+				return
+			}
+
+			// 将dapps重新分配
+			let (success_dapps, failed_dapps, change_log) =
+				Self::ow_deal_timeout_dapps(dapps_need_deal.clone());
+			// 数据通过交易上链
+			let _ = Self::send_signed_tx(success_dapps, failed_dapps, change_log);
+
+			log::info!("-------------------------------------------------");
+			log::info!(
+				"dapps 重新调用处理完毕: 时间：{:?}, 处理的dapps：{:?}",
+				block_number,
+				dapps_need_deal
+			);
+			log::info!("-------------------------------------------------");
 		}
 	}
 
@@ -666,6 +699,9 @@ pub mod pallet {
 			// 更新资源信息
 			Self::update_resource_info(resource_change_log);
 
+			// dapp_need_deal 清零
+			DAppsNeedToDeal::<T>::put(Vec::<u64>::new());
+
 			Ok(())
 		}
 	}
@@ -1018,7 +1054,9 @@ impl<T: Config> Pallet<T> {
 	/// 只能读链上数据，不能往链上写数据
 	/// 需要记录做过的操作
 	/// 处理需要处理的dapps
-	fn ow_deal_timeout_dapps(dapps_index: Vec<u64>) {
+	fn ow_deal_timeout_dapps(
+		dapps_index: Vec<u64>,
+	) -> (Vec<(u64, u64)>, Vec<u64>, ResourceChangeLog) {
 		// 资源做过的操作 (resource_index, cpu, memory)
 		let mut resource_change_log = ResourceChangeLog::new();
 		// 资源排行
@@ -1045,7 +1083,8 @@ impl<T: Config> Pallet<T> {
 			}
 		}
 
-		//  将数据签名上链
+		// 返回需要上传到链上的数据
+		(success_dapps, failed_dapps, resource_change_log)
 	}
 
 	/// offchain worker 函数
@@ -1151,6 +1190,41 @@ impl<T: Config> Pallet<T> {
 			v.0 = v.0 + cpu as u64 + mem as u64;
 		}
 		ResourceRank::<T>::put(resource_rank);
+	}
+
+	/// 发送签名交易
+	fn send_signed_tx(
+		success_dapps: Vec<(u64, u64)>,
+		failed_dapps: Vec<u64>,
+		resource_change_log: ResourceChangeLog,
+	) -> Result<(), &'static str> {
+		let signer = Signer::<T, T::AuthorityId>::all_accounts();
+		if !signer.can_sign() {
+			return Err(
+				"No local accounts available. Consider adding one via 'author_insertKey' RPC",
+			)
+		}
+
+		// 有能够签名的帐号
+		let results = signer.send_signed_transaction(|_account| Call::ow_update_data {
+			success_dapps: success_dapps.clone(),
+			failed_dapps: failed_dapps.clone(),
+			resource_change_log: resource_change_log.clone(),
+		});
+
+		for (acc, res) in &results {
+			match res {
+				Ok(()) => log::info!(
+					"[{:?}] success upload data:{:?} {:?}",
+					acc.id,
+					success_dapps,
+					failed_dapps
+				),
+				Err(e) => log::error!("[{:?}] Failed to submit transaction: {:?}", acc.id, e),
+			}
+		}
+
+		Ok(())
 	}
 }
 
